@@ -5,6 +5,8 @@ import (
 	"log"
 	"os"
 
+	"balance-web/internal/infrastructure/memory"
+	"balance-web/internal/infrastructure/websocket"
 	httphandlers "balance-web/internal/presentation/http"
 	wshandlers "balance-web/internal/presentation/ws"
 
@@ -24,7 +26,15 @@ func main() {
 		port = "3000"
 	}
 
-	// Create Echo instance
+	// 1. Initialize In-Memory Store
+	// Note: NewStore() automatically calls SeedStore() internally
+	store := memory.NewStore()
+
+	// 2. Initialize WebSocket Hub & Run it concurrently
+	hub := websocket.NewHub()
+	go hub.Run()
+
+	// 3. Create Echo instance
 	e := echo.New()
 
 	// Middleware
@@ -34,12 +44,14 @@ func main() {
 	// Serve static files from the web/static directory
 	e.Static("/static", "web/static")
 
-	// Register HTTP routes (health check, index page)
-	httpH := httphandlers.NewHandlers()
+	// 4. Instantiate & Register HTTP routes
+	// Pass the store dependency
+	httpH := httphandlers.NewHandlers(store)
 	httpH.RegisterRoutes(e)
 
-	// Register WebSocket routes (placeholder)
-	wsH := wshandlers.NewHandlers()
+	// 5. Instantiate & Register WebSocket routes
+	// Pass the hub dependency
+	wsH := wshandlers.NewHandlers(hub)
 	wsH.RegisterRoutes(e)
 
 	// Start server

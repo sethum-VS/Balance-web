@@ -4,6 +4,7 @@ go 1.26.1
 
 require (
 	github.com/a-h/templ v0.3.1001
+	github.com/gorilla/websocket v1.5.3
 	github.com/joho/godotenv v1.5.1
 	github.com/labstack/echo/v4 v4.15.1
 )

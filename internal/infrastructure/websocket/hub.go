@@ -1,59 +1,60 @@
 package websocket
 
-import "sync"
+import (
+	"balance-web/internal/domain"
+	"sync"
+)
 
-// Client represents a single WebSocket connection.
+// Client represents a single connected active WebSocket endpoint.
 type Client struct {
 	ID   string
-	Send chan []byte
+	Send chan *domain.WSEvent // Passes event structs instead of raw byte slices
 }
 
-// Hub maintains the set of active WebSocket clients and broadcasts
-// messages to them. This is a placeholder for future real-time features.
+// Hub maintains the set of active WebSocket clients and processes broadcasts.
 type Hub struct {
-	clients    map[string]*Client
-	register   chan *Client
-	unregister chan *Client
-	broadcast  chan []byte
+	Clients    map[string]*Client
+	Register   chan *Client
+	Unregister chan *Client
+	Broadcast  chan *domain.WSEvent
 	mu         sync.RWMutex
 }
 
-// NewHub creates and returns a new Hub instance.
+// NewHub allocates a new Hub.
 func NewHub() *Hub {
 	return &Hub{
-		clients:    make(map[string]*Client),
-		register:   make(chan *Client),
-		unregister: make(chan *Client),
-		broadcast:  make(chan []byte),
+		Clients:    make(map[string]*Client),
+		Register:   make(chan *Client),
+		Unregister: make(chan *Client),
+		Broadcast:  make(chan *domain.WSEvent),
 	}
 }
 
-// Run starts the hub's event loop, processing client registrations,
-// unregistrations, and broadcast messages.
+// Run listens to the Hub's channels and safely processes additions, removals, and broadcasts.
 func (h *Hub) Run() {
 	for {
 		select {
-		case client := <-h.register:
+		case client := <-h.Register:
 			h.mu.Lock()
-			h.clients[client.ID] = client
+			h.Clients[client.ID] = client
 			h.mu.Unlock()
 
-		case client := <-h.unregister:
+		case client := <-h.Unregister:
 			h.mu.Lock()
-			if _, ok := h.clients[client.ID]; ok {
-				delete(h.clients, client.ID)
+			if _, ok := h.Clients[client.ID]; ok {
+				delete(h.Clients, client.ID)
 				close(client.Send)
 			}
 			h.mu.Unlock()
 
-		case message := <-h.broadcast:
+		case message := <-h.Broadcast:
 			h.mu.RLock()
-			for _, client := range h.clients {
+			for _, client := range h.Clients {
 				select {
 				case client.Send <- message:
 				default:
 					close(client.Send)
-					delete(h.clients, client.ID)
+					delete(h.Clients, client.ID)
 				}
 			}
 			h.mu.RUnlock()

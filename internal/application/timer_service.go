@@ -10,32 +10,32 @@ import (
 // and calculating time/credit sessions.
 type TimerService struct {
 	sessionRepo  domain.SessionRepository
-	activityRepo domain.ActivityRepository
+	activityRepo domain.ActivityProfileRepository
 }
 
 // NewTimerService creates a new TimerService with the given repositories.
-func NewTimerService(sr domain.SessionRepository, ar domain.ActivityRepository) *TimerService {
+func NewTimerService(sr domain.SessionRepository, ar domain.ActivityProfileRepository) *TimerService {
 	return &TimerService{
 		sessionRepo:  sr,
 		activityRepo: ar,
 	}
 }
 
-// StartSession begins a new time-tracking session for the given activity.
-func (s *TimerService) StartSession(activityID string) (*domain.Session, error) {
-	activity, err := s.activityRepo.FindByID(activityID)
+// StartSession begins a new time-tracking session for the given activity profile.
+func (s *TimerService) StartSession(activityProfileID string) (*domain.Session, error) {
+	activity, err := s.activityRepo.FindByID(activityProfileID)
 	if err != nil {
-		return nil, fmt.Errorf("activity not found: %w", err)
+		return nil, fmt.Errorf("activity profile not found: %w", err)
 	}
 	if activity == nil {
-		return nil, fmt.Errorf("activity with id %s does not exist", activityID)
+		return nil, fmt.Errorf("activity profile with id %s does not exist", activityProfileID)
 	}
 
 	session := &domain.Session{
-		ID:         fmt.Sprintf("sess_%d", time.Now().UnixNano()),
-		ActivityID: activityID,
-		Status:     domain.SessionStatusActive,
-		StartTime:  time.Now(),
+		ID:                fmt.Sprintf("sess_%d", time.Now().UnixNano()),
+		ActivityProfileID: activityProfileID,
+		Status:            domain.SessionStatusActive,
+		StartTime:         time.Now(),
 	}
 
 	if err := s.sessionRepo.Save(session); err != nil {
@@ -61,12 +61,15 @@ func (s *TimerService) StopSession(sessionID string) (*domain.Session, error) {
 	now := time.Now()
 	session.EndTime = &now
 	session.Status = domain.SessionStatusCompleted
+	
+	duration := now.Sub(session.StartTime).Seconds()
+	session.Duration = int(duration)
 
-	// Calculate credits based on activity's credit-per-hour rate
-	activity, err := s.activityRepo.FindByID(session.ActivityID)
+	// Calculate credits based on activity profile's credit-per-hour rate
+	activity, err := s.activityRepo.FindByID(session.ActivityProfileID)
 	if err == nil && activity != nil {
-		duration := now.Sub(session.StartTime).Hours()
-		session.CreditsEarned = duration * activity.CreditPerHour
+		hours := duration / 3600.0
+		session.CreditsEarned = int(hours * activity.CreditPerHour)
 	}
 
 	if err := s.sessionRepo.Save(session); err != nil {

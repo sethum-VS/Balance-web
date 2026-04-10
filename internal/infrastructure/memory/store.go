@@ -7,14 +7,14 @@ import (
 	"time"
 )
 
-// Store provides an in-memory implementation of the domain repositories.
+// Store provides an in-memory data store for activities and sessions.
 type Store struct {
 	activities map[string]*domain.ActivityProfile
 	sessions   map[string]*domain.Session
 	mu         sync.RWMutex
 }
 
-// NewStore creates and returns a new in-memory Store.
+// NewStore creates and returns a new in-memory Store pre-seeded with mock data.
 func NewStore() *Store {
 	store := &Store{
 		activities: make(map[string]*domain.ActivityProfile),
@@ -65,13 +65,15 @@ func (s *Store) SeedStore() {
 	}
 
 	for _, m := range mocks {
-		_ = s.SaveActivityProfile(m)
+		s.mu.Lock()
+		s.activities[m.ID] = m
+		s.mu.Unlock()
 	}
 }
 
-// --- ActivityProfileRepository implementation ---
+// ---------- Direct Activity Methods ----------
 
-func (s *Store) FindByID(id string) (*domain.ActivityProfile, error) {
+func (s *Store) FindActivityByID(id string) (*domain.ActivityProfile, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	activity, ok := s.activities[id]
@@ -81,7 +83,7 @@ func (s *Store) FindByID(id string) (*domain.ActivityProfile, error) {
 	return activity, nil
 }
 
-func (s *Store) FindAll() ([]*domain.ActivityProfile, error) {
+func (s *Store) FindAllActivities() ([]*domain.ActivityProfile, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	result := make([]*domain.ActivityProfile, 0, len(s.activities))
@@ -91,21 +93,21 @@ func (s *Store) FindAll() ([]*domain.ActivityProfile, error) {
 	return result, nil
 }
 
-func (s *Store) SaveActivityProfile(activity *domain.ActivityProfile) error {
+func (s *Store) SaveActivity(activity *domain.ActivityProfile) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.activities[activity.ID] = activity
 	return nil
 }
 
-func (s *Store) DeleteActivityProfile(id string) error {
+func (s *Store) DeleteActivity(id string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	delete(s.activities, id)
 	return nil
 }
 
-// --- SessionRepository implementation (FindAll, etc) ---
+// ---------- Direct Session Methods ----------
 
 func (s *Store) FindSessionByID(id string) (*domain.Session, error) {
 	s.mu.RLock()
@@ -127,7 +129,7 @@ func (s *Store) FindAllSessions() ([]*domain.Session, error) {
 	return result, nil
 }
 
-func (s *Store) FindByActivityProfileID(activityProfileID string) ([]*domain.Session, error) {
+func (s *Store) FindSessionsByActivityProfileID(activityProfileID string) ([]*domain.Session, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	result := make([]*domain.Session, 0)
@@ -139,16 +141,67 @@ func (s *Store) FindByActivityProfileID(activityProfileID string) ([]*domain.Ses
 	return result, nil
 }
 
-func (s *Store) Save(session *domain.Session) error {
+func (s *Store) SaveSession(session *domain.Session) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.sessions[session.ID] = session
 	return nil
 }
 
-func (s *Store) Delete(id string) error {
+func (s *Store) DeleteSession(id string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	delete(s.sessions, id)
 	return nil
+}
+
+// ---------- Adapter Types for Domain Interfaces ----------
+
+// ActivityRepoAdapter adapts Store to satisfy domain.ActivityProfileRepository.
+type ActivityRepoAdapter struct {
+	store *Store
+}
+
+// NewActivityRepoAdapter wraps a Store as an ActivityProfileRepository.
+func NewActivityRepoAdapter(s *Store) *ActivityRepoAdapter {
+	return &ActivityRepoAdapter{store: s}
+}
+
+func (a *ActivityRepoAdapter) FindByID(id string) (*domain.ActivityProfile, error) {
+	return a.store.FindActivityByID(id)
+}
+func (a *ActivityRepoAdapter) FindAll() ([]*domain.ActivityProfile, error) {
+	return a.store.FindAllActivities()
+}
+func (a *ActivityRepoAdapter) Save(ap *domain.ActivityProfile) error {
+	return a.store.SaveActivity(ap)
+}
+func (a *ActivityRepoAdapter) Delete(id string) error {
+	return a.store.DeleteActivity(id)
+}
+
+// SessionRepoAdapter adapts Store to satisfy domain.SessionRepository.
+type SessionRepoAdapter struct {
+	store *Store
+}
+
+// NewSessionRepoAdapter wraps a Store as a SessionRepository.
+func NewSessionRepoAdapter(s *Store) *SessionRepoAdapter {
+	return &SessionRepoAdapter{store: s}
+}
+
+func (a *SessionRepoAdapter) FindByID(id string) (*domain.Session, error) {
+	return a.store.FindSessionByID(id)
+}
+func (a *SessionRepoAdapter) FindAll() ([]*domain.Session, error) {
+	return a.store.FindAllSessions()
+}
+func (a *SessionRepoAdapter) FindByActivityProfileID(id string) ([]*domain.Session, error) {
+	return a.store.FindSessionsByActivityProfileID(id)
+}
+func (a *SessionRepoAdapter) Save(s *domain.Session) error {
+	return a.store.SaveSession(s)
+}
+func (a *SessionRepoAdapter) Delete(id string) error {
+	return a.store.DeleteSession(id)
 }

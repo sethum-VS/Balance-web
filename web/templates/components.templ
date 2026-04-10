@@ -1,0 +1,53 @@
+package templates
+
+import (
+	"balance-web/internal/domain"
+	"fmt"
+)
+
+// iconMap returns a Material Symbols icon name from the ActivityProfile's IconName field.
+func iconMap(iconName string) string {
+	m := map[string]string{
+		"desktopcomputer": "work",
+		"figure.yoga":     "fitness_center",
+		"iphone":          "phone_iphone",
+		"gamecontroller":  "sports_esports",
+	}
+	if v, ok := m[iconName]; ok {
+		return v
+	}
+	return "category"
+}
+
+templ ActivityCard(profile *domain.ActivityProfile) {
+	<div class="bg-surface-container-high p-8 rounded-xl neumorphic-up group hover:bg-surface-bright transition-all">
+		if profile.Category == domain.ActivityCategoryToppingUp {
+			<span class="material-symbols-outlined text-secondary text-4xl mb-4">{ iconMap(profile.IconName) }</span>
+		} else {
+			<span class="material-symbols-outlined text-error text-4xl mb-4">{ iconMap(profile.IconName) }</span>
+		}
+		<h4 class="font-bold text-lg mb-1">{ profile.Name }</h4>
+		if profile.CreditPerHour > 0 {
+			<p class="text-xs text-on-surface-variant mb-6">{ fmt.Sprintf("+%.0f CR / Hr", profile.CreditPerHour) }</p>
+		} else {
+			<p class="text-xs text-on-surface-variant mb-6">Tracked activity</p>
+		}
+		if profile.Category == domain.ActivityCategoryToppingUp {
+			<button
+				class="w-full py-3 bg-surface-container-lowest text-secondary font-bold text-sm rounded-lg neumorphic-down hover:text-white hover:bg-secondary/20 transition-all"
+				hx-post={ fmt.Sprintf("/api/timer/start?activityID=%s", profile.ID) }
+				hx-swap="none"
+			>
+				Start
+			</button>
+		} else {
+			<button
+				class="w-full py-3 bg-surface-container-lowest text-error font-bold text-sm rounded-lg neumorphic-down hover:text-white hover:bg-error/20 transition-all"
+				hx-post={ fmt.Sprintf("/api/timer/start?activityID=%s", profile.ID) }
+				hx-swap="none"
+			>
+				Start
+			</button>
+		}
+	</div>
+}

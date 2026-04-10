@@ -1,0 +1,82 @@
+package templates
+
+import "balance-web/internal/domain"
+
+templ Dashboard(activities []*domain.ActivityProfile, currentBalance string) {
+	@Layout(currentBalance) {
+		<main class="flex-1 p-6 md:p-12">
+			<!-- Clock Interface Section -->
+			<section class="max-w-5xl mx-auto flex flex-col items-center mb-16">
+				<div class="relative flex items-center justify-center p-12">
+					<!-- Progress Ring -->
+					<svg class="absolute w-[400px] h-[400px] rotate-[-90deg]" id="progress-ring">
+						<circle class="text-surface-container-highest" cx="200" cy="200" fill="transparent" r="185" stroke="currentColor" stroke-width="8"></circle>
+						<circle class="text-secondary" cx="200" cy="200" fill="transparent" r="185" stroke="currentColor" stroke-dasharray="1162" stroke-dashoffset="1162" stroke-linecap="round" stroke-width="12" id="progress-circle"></circle>
+					</svg>
+					<div class="flex flex-col items-center z-10">
+						<span id="session-label" class="text-on-surface-variant font-bold tracking-[0.3em] uppercase text-sm mb-4">No Active Session</span>
+						<h1 id="clock-display" class="text-[8rem] font-extrabold leading-none tracking-tighter tabular-nums drop-shadow-2xl">00:00:00</h1>
+						<div id="session-status" class="flex items-center gap-3 mt-6 bg-surface-container-high/50 px-6 py-2 rounded-full border border-outline-variant/20 opacity-50">
+							<span id="status-pulse" class="w-2 h-2 rounded-full bg-outline"></span>
+							<span id="status-text" class="text-on-surface-variant font-bold tracking-wide">Idle</span>
+						</div>
+					</div>
+				</div>
+				<!-- Action Buttons -->
+				<div class="flex gap-12 relative z-20 mt-12">
+					<div class="flex flex-col items-center gap-4">
+						<button id="btn-stop-topup" class="w-24 h-24 rounded-full bg-gradient-to-br from-[#00C9FF] to-[#92FE9D] flex items-center justify-center neumorphic-up hover:scale-105 active:scale-95 transition-all shadow-xl shadow-[#00C9FF]/20 group hidden" hx-post="/api/timer/stop" hx-swap="none">
+							<span class="material-symbols-outlined text-4xl text-on-secondary" style="font-variation-settings: 'FILL' 1;">stop_circle</span>
+						</button>
+						<button id="btn-topup" class="w-24 h-24 rounded-full bg-gradient-to-br from-[#00C9FF] to-[#92FE9D] flex items-center justify-center neumorphic-up hover:scale-105 active:scale-95 transition-all shadow-xl shadow-[#00C9FF]/20 group">
+							<span class="material-symbols-outlined text-4xl text-on-secondary" style="font-variation-settings: 'FILL' 1;">add_circle</span>
+						</button>
+						<span class="text-secondary font-bold uppercase tracking-widest text-xs">Top-Up</span>
+					</div>
+					<div class="flex flex-col items-center gap-4">
+						<button id="btn-stop-consume" class="w-24 h-24 rounded-full bg-gradient-to-br from-[#FC466B] to-[#3F5EFB] flex items-center justify-center neumorphic-up hover:scale-105 active:scale-95 transition-all shadow-xl shadow-[#FC466B]/20 group hidden" hx-post="/api/timer/stop" hx-swap="none">
+							<span class="material-symbols-outlined text-4xl text-white" style="font-variation-settings: 'FILL' 1;">stop_circle</span>
+						</button>
+						<button id="btn-consume" class="w-24 h-24 rounded-full bg-gradient-to-br from-[#FC466B] to-[#3F5EFB] flex items-center justify-center neumorphic-up hover:scale-105 active:scale-95 transition-all shadow-xl shadow-[#FC466B]/20 group">
+							<span class="material-symbols-outlined text-4xl text-white" style="font-variation-settings: 'FILL' 1;">remove_circle</span>
+						</button>
+						<span class="text-error font-bold uppercase tracking-widest text-xs">Consume</span>
+					</div>
+				</div>
+			</section>
+			<!-- Activity Grid -->
+			<div class="max-w-6xl mx-auto">
+				<div class="space-y-12">
+					<!-- Top-Up Activities -->
+					<div>
+						<div class="flex items-center justify-between mb-6">
+							<h2 class="text-xl font-bold tracking-tight">Top-Up Activities</h2>
+							<span class="text-secondary text-sm font-semibold">Earn Credits</span>
+						</div>
+						<div class="grid grid-cols-1 md:grid-cols-3 gap-8">
+							for _, profile := range activities {
+								if profile.Category == domain.ActivityCategoryToppingUp {
+									@ActivityCard(profile)
+								}
+							}
+						</div>
+					</div>
+					<!-- Consume Activities -->
+					<div>
+						<div class="flex items-center justify-between mb-6">
+							<h2 class="text-xl font-bold tracking-tight">Consume Activities</h2>
+							<span class="text-error text-sm font-semibold">Spend Credits</span>
+						</div>
+						<div class="grid grid-cols-1 md:grid-cols-3 gap-8">
+							for _, profile := range activities {
+								if profile.Category == domain.ActivityCategoryConsuming {
+									@ActivityCard(profile)
+								}
+							}
+						</div>
+					</div>
+				</div>
+			</div>
+		</main>
+	}
+}

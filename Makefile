@@ -7,19 +7,19 @@ esbuild:
 
 compile:
 	@make clean
-	@templ generate
+	@go run github.com/a-h/templ/cmd/templ@latest generate
 	mkdir -p ./bin
 	go build -o ./bin/server ./cmd/server
 
 compile_linux:
 	@make clean
-	@templ generate
+	@go run github.com/a-h/templ/cmd/templ@latest generate
 	mkdir -p ./bin
 	GOARCH=amd64 GOOS=linux go build -o ./bin/server ./cmd/server
 
 run:
 	@make esbuild
-	@templ generate
+	@go run github.com/a-h/templ/cmd/templ@latest generate
 	@make compile
 	./bin/server
 

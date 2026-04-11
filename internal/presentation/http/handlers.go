@@ -1,8 +1,10 @@
 package httphandlers
 
 import (
+	"fmt"
 	"log"
 	"net/http"
+	"time"
 
 	"balance-web/internal/application"
 	"balance-web/internal/domain"
@@ -42,6 +44,7 @@ func (h *Handlers) RegisterRoutes(e *echo.Echo) {
 	api.GET("/activities", h.GetActivities)
 	api.POST("/timer/start", h.StartTimer)
 	api.POST("/timer/stop", h.StopTimer)
+	api.POST("/sync", h.SyncSessions)
 }
 
 // HealthHandler returns a simple JSON health check response.
@@ -164,8 +167,10 @@ func (h *Handlers) IndexHandler(c echo.Context) error {
 	if totalBalance > 0 {
 		balanceStr = formatBalance(totalBalance)
 	}
+	
+	isMobileOnline := h.hub.IsMobileOnline()
 
-	component := templates.Dashboard(activities, balanceStr)
+	component := templates.Dashboard(activities, balanceStr, isMobileOnline)
 	return Render(c, http.StatusOK, component)
 }
 
@@ -204,4 +209,49 @@ func Render(c echo.Context, statusCode int, t templ.Component) error {
 	c.Response().Writer.Header().Set(echo.HeaderContentType, echo.MIMETextHTMLCharsetUTF8)
 	c.Response().Writer.WriteHeader(statusCode)
 	return t.Render(c.Request().Context(), c.Response().Writer)
+}
+
+type SyncPayload struct {
+	ActivityID    string    `json:"activityID"`
+	Duration      int       `json:"duration"`
+	CreditsEarned int       `json:"creditsEarned"`
+	StartTime     time.Time `json:"startTime"`
+	Timestamp     time.Time `json:"timestamp"`
+}
+
+// SyncSessions handles POST /api/sync
+func (h *Handlers) SyncSessions(c echo.Context) error {
+	var payloads []SyncPayload
+	if err := c.Bind(&payloads); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
+
+	for _, payload := range payloads {
+		session := &domain.Session{
+			ID:                fmt.Sprintf("sess_%d", payload.Timestamp.UnixNano()),
+			ActivityProfileID: payload.ActivityID,
+			Status:            domain.SessionStatusCompleted,
+			StartTime:         payload.StartTime,
+			Duration:          payload.Duration,
+			CreditsEarned:     payload.CreditsEarned,
+		}
+		
+		now := payload.Timestamp
+		session.EndTime = &now
+
+		if err := h.store.SaveSession(session); err != nil {
+			log.Printf("[SyncSessions] Failed to save session %s: %v", session.ID, err)
+			continue
+		}
+	}
+
+	totalBalance := h.timerService.CalculateGlobalBalance()
+	log.Printf("[SyncSessions] Sync processed %d sessions. New global balance: %d CR", len(payloads), totalBalance)
+
+	h.hub.Broadcast <- &domain.WSEvent{
+		Type:    domain.EventBalanceUpdated,
+		Payload: map[string]interface{}{"balance": totalBalance},
+	}
+
+	return c.NoContent(http.StatusOK)
 }

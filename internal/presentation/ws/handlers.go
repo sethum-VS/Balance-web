@@ -44,9 +44,15 @@ func (h *Handlers) ServeWS(c echo.Context) error {
 		return err
 	}
 
+	deviceType := c.Request().Header.Get("X-Client-Type")
+	if deviceType == "" {
+		deviceType = "web"
+	}
+
 	client := &infrastructure.Client{
-		ID:   conn.RemoteAddr().String(),
-		Send: make(chan *domain.WSEvent, 256),
+		ID:         conn.RemoteAddr().String(),
+		DeviceType: deviceType,
+		Send:       make(chan *domain.WSEvent, 256),
 	}
 	
 	h.hub.Register <- client

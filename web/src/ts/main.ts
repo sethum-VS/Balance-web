@@ -29,6 +29,10 @@ interface BalanceUpdatedPayload {
   balance: number;
 }
 
+interface MobileStatusPayload {
+  isOnline: boolean;
+}
+
 // ──────────────────────────── State ────────────────────────────
 let ws: WebSocket | null = null;
 let clockInterval: ReturnType<typeof setInterval> | null = null;
@@ -95,6 +99,9 @@ function dispatchWSEvent(event: WSEvent): void {
       break;
     case "BALANCE_UPDATED":
       handleBalanceUpdated(event.payload as BalanceUpdatedPayload);
+      break;
+    case "MOBILE_STATUS":
+      handleMobileStatus(event.payload as MobileStatusPayload);
       break;
     default:
       console.warn("[Balance WS] Unknown event type:", event.type);
@@ -210,6 +217,26 @@ function handleBalanceUpdated(payload: BalanceUpdatedPayload): void {
   }
 }
 
+// ──────────────────────────── MOBILE_STATUS ────────────────────────────
+function handleMobileStatus(payload: MobileStatusPayload): void {
+  const overlay = document.getElementById("mobile-offline-overlay");
+  const lockableUIs = document.querySelectorAll(".lockable-ui");
+
+  if (payload.isOnline) {
+    overlay?.classList.add("hidden");
+    lockableUIs.forEach((el) => {
+      (el as HTMLElement).style.pointerEvents = "auto";
+      (el as HTMLElement).style.opacity = "1";
+    });
+  } else {
+    overlay?.classList.remove("hidden");
+    lockableUIs.forEach((el) => {
+      (el as HTMLElement).style.pointerEvents = "none";
+      (el as HTMLElement).style.opacity = "0.5";
+    });
+  }
+}
+
 // ──────────────────────────── Dual-Clock Tick ────────────────────────────
 function startClockInterval(): void {
   stopClockInterval();
@@ -298,6 +325,12 @@ document.addEventListener("DOMContentLoaded", () => {
     const initial = parseInt(balanceDisplay.textContent?.replace(/,/g, "") || "0", 10);
     globalBalance = isNaN(initial) ? 0 : initial;
     baseBalance = globalBalance;
+  }
+
+  // Handle initial offline state
+  const overlay = document.getElementById("mobile-offline-overlay");
+  if (overlay && !overlay.classList.contains("hidden")) {
+    handleMobileStatus({ isOnline: false });
   }
 
   connectWebSocket();

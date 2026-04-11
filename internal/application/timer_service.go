@@ -3,6 +3,7 @@ package application
 import (
 	"balance-web/internal/domain"
 	"fmt"
+	"log"
 	"time"
 )
 
@@ -46,6 +47,7 @@ func (s *TimerService) StartSession(activityProfileID string) (*domain.Session, 
 }
 
 // StopSession ends an active session and calculates earned credits.
+// Rule: 1 Second = 1 CR. ToppingUp earns positive, Consuming earns negative.
 func (s *TimerService) StopSession(sessionID string) (*domain.Session, error) {
 	session, err := s.sessionRepo.FindByID(sessionID)
 	if err != nil {
@@ -61,20 +63,45 @@ func (s *TimerService) StopSession(sessionID string) (*domain.Session, error) {
 	now := time.Now()
 	session.EndTime = &now
 	session.Status = domain.SessionStatusCompleted
-	
-	duration := now.Sub(session.StartTime).Seconds()
-	session.Duration = int(duration)
 
-	// Calculate credits based on activity profile's credit-per-hour rate
+	// Calculate exact duration in seconds
+	durationSecs := int(time.Since(session.StartTime).Seconds())
+	session.Duration = durationSecs
+
+	// Determine credit sign based on activity category
 	activity, err := s.activityRepo.FindByID(session.ActivityProfileID)
 	if err == nil && activity != nil {
-		hours := duration / 3600.0
-		session.CreditsEarned = int(hours * activity.CreditPerHour)
+		if activity.Category == domain.ActivityCategoryToppingUp {
+			session.CreditsEarned = durationSecs // +N CR
+		} else if activity.Category == domain.ActivityCategoryConsuming {
+			session.CreditsEarned = -durationSecs // -N CR
+		}
 	}
 
+	log.Printf("[TimerService] StopSession: id=%s duration=%ds credits=%d category=%s",
+		session.ID, session.Duration, session.CreditsEarned, activity.Category)
+
+	// Persist the completed session with calculated credits
 	if err := s.sessionRepo.Save(session); err != nil {
 		return nil, fmt.Errorf("failed to save session: %w", err)
 	}
 
 	return session, nil
+}
+
+// CalculateGlobalBalance sums CreditsEarned across all completed sessions.
+func (s *TimerService) CalculateGlobalBalance() int {
+	sessions, err := s.sessionRepo.FindAll()
+	if err != nil {
+		log.Printf("[TimerService] Error fetching sessions for balance: %v", err)
+		return 0
+	}
+
+	total := 0
+	for _, sess := range sessions {
+		if sess.Status == domain.SessionStatusCompleted {
+			total += sess.CreditsEarned
+		}
+	}
+	return total
 }

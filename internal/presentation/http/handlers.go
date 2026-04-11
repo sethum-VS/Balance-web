@@ -92,13 +92,7 @@ func (h *Handlers) StartTimer(c echo.Context) error {
 	}
 
 	// Calculate the current global CR balance (base) at session start
-	allSessions, _ := h.store.FindAllSessions()
-	baseBalance := 0
-	for _, s := range allSessions {
-		if s.Status == domain.SessionStatusCompleted {
-			baseBalance += s.CreditsEarned
-		}
-	}
+	baseBalance := h.timerService.CalculateGlobalBalance()
 
 	// Broadcast TIMER_STARTED event with baseBalance for client-side ticking
 	h.hub.Broadcast <- &domain.WSEvent{
@@ -129,6 +123,9 @@ func (h *Handlers) StopTimer(c echo.Context) error {
 
 	h.activeSessionID = ""
 
+	log.Printf("[StopTimer] Session stopped: id=%s duration=%ds credits=%d",
+		session.ID, session.Duration, session.CreditsEarned)
+
 	// Broadcast TIMER_STOPPED immediately
 	h.hub.Broadcast <- &domain.WSEvent{
 		Type: domain.EventTimerStopped,
@@ -140,13 +137,8 @@ func (h *Handlers) StopTimer(c echo.Context) error {
 	}
 
 	// Immediately follow with BALANCE_UPDATED so clients sync to final CR
-	allSessions, _ := h.store.FindAllSessions()
-	totalBalance := 0
-	for _, s := range allSessions {
-		if s.Status == domain.SessionStatusCompleted {
-			totalBalance += s.CreditsEarned
-		}
-	}
+	totalBalance := h.timerService.CalculateGlobalBalance()
+	log.Printf("[StopTimer] Global balance after stop: %d CR", totalBalance)
 
 	h.hub.Broadcast <- &domain.WSEvent{
 		Type: domain.EventBalanceUpdated,
@@ -166,13 +158,7 @@ func (h *Handlers) IndexHandler(c echo.Context) error {
 	}
 
 	// Calculate current balance from completed sessions
-	allSessions, _ := h.store.FindAllSessions()
-	totalBalance := 0
-	for _, s := range allSessions {
-		if s.Status == domain.SessionStatusCompleted {
-			totalBalance += s.CreditsEarned
-		}
-	}
+	totalBalance := h.timerService.CalculateGlobalBalance()
 
 	balanceStr := "0"
 	if totalBalance > 0 {

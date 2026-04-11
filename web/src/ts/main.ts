@@ -1,6 +1,9 @@
-// Balance Web — WebSocket Client
-// Connects to the server's /ws endpoint and dispatches UI updates
-// based on WSEvent messages from the Hub.
+// Balance Web — Dual-Clock WebSocket Client
+// Implements two independent clocks:
+//   1. Global CR Balance — ticks up (toppingUp) or down (consuming) each second
+//   2. Local Session Clock — pure elapsed time display (00:00:00)
+// The server sends baseBalance with TIMER_STARTED so we can animate locally,
+// then corrects any drift with an authoritative BALANCE_UPDATED on stop.
 
 interface WSEvent {
   type: string;
@@ -13,6 +16,7 @@ interface TimerStartedPayload {
   activityName: string;
   activityCategory: string;
   startTime: string;
+  baseBalance: number;
 }
 
 interface TimerStoppedPayload {
@@ -25,13 +29,18 @@ interface BalanceUpdatedPayload {
   balance: number;
 }
 
-// State
+// ──────────────────────────── State ────────────────────────────
 let ws: WebSocket | null = null;
 let clockInterval: ReturnType<typeof setInterval> | null = null;
+
+// Dual-clock state
 let sessionStartTime: Date | null = null;
 let activeCategory: string = "";
+let baseBalance: number = 0;       // CR pool snapshot at session start
+let globalBalance: number = 0;     // Live-ticking global CR
+let currentSessionTime: number = 0; // Local elapsed seconds
 
-// DOM References (resolved after DOMContentLoaded)
+// ──────────────────────────── DOM Refs ────────────────────────────
 let clockDisplay: HTMLElement | null;
 let balanceDisplay: HTMLElement | null;
 let sessionLabel: HTMLElement | null;
@@ -44,6 +53,7 @@ let btnStopTopup: HTMLElement | null;
 let btnConsume: HTMLElement | null;
 let btnStopConsume: HTMLElement | null;
 
+// ──────────────────────────── WebSocket ────────────────────────────
 function connectWebSocket(): void {
   const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
   const wsUrl = `${protocol}//${window.location.host}/ws`;
@@ -58,7 +68,7 @@ function connectWebSocket(): void {
     try {
       const data: WSEvent = JSON.parse(event.data);
       console.log("[Balance WS] Event:", data.type, data.payload);
-      dispatchEvent(data);
+      dispatchWSEvent(data);
     } catch (e) {
       console.error("[Balance WS] Failed to parse message:", e);
     }
@@ -75,7 +85,7 @@ function connectWebSocket(): void {
   };
 }
 
-function dispatchEvent(event: WSEvent): void {
+function dispatchWSEvent(event: WSEvent): void {
   switch (event.type) {
     case "TIMER_STARTED":
       handleTimerStarted(event.payload as TimerStartedPayload);
@@ -91,9 +101,14 @@ function dispatchEvent(event: WSEvent): void {
   }
 }
 
+// ──────────────────────────── TIMER_STARTED ────────────────────────────
 function handleTimerStarted(payload: TimerStartedPayload): void {
+  // Save dual-clock state
   sessionStartTime = new Date(payload.startTime);
   activeCategory = payload.activityCategory;
+  baseBalance = payload.baseBalance;
+  globalBalance = baseBalance;
+  currentSessionTime = 0;
 
   // Update session label
   if (sessionLabel) {
@@ -133,16 +148,18 @@ function handleTimerStarted(payload: TimerStartedPayload): void {
     if (btnStopConsume) btnStopConsume.classList.remove("hidden");
   }
 
-  // Start the local clock interval
+  // Start the dual-clock interval
   startClockInterval();
 }
 
+// ──────────────────────────── TIMER_STOPPED ────────────────────────────
 function handleTimerStopped(_payload: TimerStoppedPayload): void {
-  // Clear local clock
+  // Invalidate timer
   stopClockInterval();
   sessionStartTime = null;
+  currentSessionTime = 0;
 
-  // Reset clock display
+  // Reset session clock display
   if (clockDisplay) {
     clockDisplay.textContent = "00:00:00";
   }
@@ -178,18 +195,26 @@ function handleTimerStopped(_payload: TimerStoppedPayload): void {
   if (btnStopConsume) btnStopConsume.classList.add("hidden");
 
   activeCategory = "";
+  // Note: globalBalance is NOT reset here — it will be corrected
+  // by the BALANCE_UPDATED event that follows immediately
 }
 
+// ──────────────────────────── BALANCE_UPDATED ────────────────────────────
 function handleBalanceUpdated(payload: BalanceUpdatedPayload): void {
+  // Server sends the authoritative final balance — corrects any local drift
+  globalBalance = payload.balance;
+  baseBalance = payload.balance;
+
   if (balanceDisplay) {
-    balanceDisplay.textContent = formatBalance(payload.balance);
+    balanceDisplay.textContent = formatBalance(globalBalance);
   }
 }
 
+// ──────────────────────────── Dual-Clock Tick ────────────────────────────
 function startClockInterval(): void {
   stopClockInterval();
-  clockInterval = setInterval(updateClock, 1000);
-  updateClock(); // Immediate first tick
+  clockInterval = setInterval(tick, 1000);
+  tick(); // Immediate first tick
 }
 
 function stopClockInterval(): void {
@@ -199,27 +224,42 @@ function stopClockInterval(): void {
   }
 }
 
-function updateClock(): void {
-  if (!sessionStartTime || !clockDisplay) return;
+function tick(): void {
+  if (!sessionStartTime) return;
 
   const now = new Date();
-  const elapsed = Math.floor((now.getTime() - sessionStartTime.getTime()) / 1000);
+  const elapsed = Math.floor(
+    (now.getTime() - sessionStartTime.getTime()) / 1000
+  );
 
-  const hours = Math.floor(elapsed / 3600);
-  const minutes = Math.floor((elapsed % 3600) / 60);
-  const seconds = elapsed % 60;
+  // ── Clock 1: Local Session Timer ──
+  currentSessionTime = elapsed;
 
-  clockDisplay.textContent =
-    pad(hours) + ":" + pad(minutes) + ":" + pad(seconds);
+  if (clockDisplay) {
+    const hours = Math.floor(elapsed / 3600);
+    const minutes = Math.floor((elapsed % 3600) / 60);
+    const seconds = elapsed % 60;
+    clockDisplay.textContent = pad(hours) + ":" + pad(minutes) + ":" + pad(seconds);
+  }
 
-  // Update progress ring (complete one rotation per hour)
+  // ── Clock 2: Global CR Balance ──
+  if (activeCategory === "toppingUp") {
+    globalBalance = baseBalance + elapsed;
+  } else if (activeCategory === "consuming") {
+    globalBalance = baseBalance - elapsed;
+  }
+
+  if (balanceDisplay) {
+    balanceDisplay.textContent = formatBalance(globalBalance);
+  }
+
+  // ── Progress Ring ──
   if (progressCircle) {
     const circumference = 1162;
     const progress = (elapsed % 3600) / 3600;
     const offset = circumference - progress * circumference;
     progressCircle.style.strokeDashoffset = String(offset);
 
-    // Color the ring based on category
     progressCircle.classList.remove("text-secondary", "text-error");
     progressCircle.classList.add(
       activeCategory === "toppingUp" ? "text-secondary" : "text-error"
@@ -227,6 +267,7 @@ function updateClock(): void {
   }
 }
 
+// ──────────────────────────── Helpers ────────────────────────────
 function pad(n: number): string {
   return n < 10 ? "0" + n : String(n);
 }
@@ -235,9 +276,9 @@ function formatBalance(n: number): string {
   return n.toLocaleString("en-US");
 }
 
-// Initialize on DOM ready
+// ──────────────────────────── Init ────────────────────────────
 document.addEventListener("DOMContentLoaded", () => {
-  console.log("[Balance] Initializing...");
+  console.log("[Balance] Dual-Clock Architecture Initialized");
 
   // Resolve DOM references
   clockDisplay = document.getElementById("clock-display");
@@ -252,6 +293,12 @@ document.addEventListener("DOMContentLoaded", () => {
   btnConsume = document.getElementById("btn-consume");
   btnStopConsume = document.getElementById("btn-stop-consume");
 
-  // Connect WebSocket
+  // Read initial balance from the DOM (server-rendered)
+  if (balanceDisplay) {
+    const initial = parseInt(balanceDisplay.textContent?.replace(/,/g, "") || "0", 10);
+    globalBalance = isNaN(initial) ? 0 : initial;
+    baseBalance = globalBalance;
+  }
+
   connectWebSocket();
 });

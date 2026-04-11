@@ -91,7 +91,16 @@ func (h *Handlers) StartTimer(c echo.Context) error {
 		activityCategory = string(activity.Category)
 	}
 
-	// Broadcast TIMER_STARTED event
+	// Calculate the current global CR balance (base) at session start
+	allSessions, _ := h.store.FindAllSessions()
+	baseBalance := 0
+	for _, s := range allSessions {
+		if s.Status == domain.SessionStatusCompleted {
+			baseBalance += s.CreditsEarned
+		}
+	}
+
+	// Broadcast TIMER_STARTED event with baseBalance for client-side ticking
 	h.hub.Broadcast <- &domain.WSEvent{
 		Type: domain.EventTimerStarted,
 		Payload: map[string]interface{}{
@@ -100,6 +109,7 @@ func (h *Handlers) StartTimer(c echo.Context) error {
 			"activityName":     activityName,
 			"activityCategory": activityCategory,
 			"startTime":        session.StartTime,
+			"baseBalance":      baseBalance,
 		},
 	}
 

@@ -14,12 +14,13 @@ type Client struct {
 
 // Hub maintains the set of active WebSocket clients and processes broadcasts.
 type Hub struct {
-	Clients     map[string]*Client
-	Register    chan *Client
-	Unregister  chan *Client
-	Broadcast   chan *domain.WSEvent
-	mobileCount int
-	mu          sync.RWMutex
+	Clients          map[string]*Client
+	Register         chan *Client
+	Unregister       chan *Client
+	Broadcast        chan *domain.WSEvent
+	mobileCount      int
+	GetGlobalBalance func() int // Callback to fetch absolute truth CR
+	mu               sync.RWMutex
 }
 
 // NewHub allocates a new Hub.
@@ -74,6 +75,16 @@ func (h *Hub) Run() {
 				}
 			}
 			h.mu.Unlock()
+
+			// Broadcast absolute true balance immediately to the newly connected client
+			if h.GetGlobalBalance != nil {
+				client.Send <- &domain.WSEvent{
+					Type: domain.EventBalanceUpdated,
+					Payload: map[string]interface{}{
+						"balance": h.GetGlobalBalance(),
+					},
+				}
+			}
 
 		case client := <-h.Unregister:
 			h.mu.Lock()

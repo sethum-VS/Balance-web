@@ -41,6 +41,11 @@ func main() {
 	// 4. Initialize TimerService with the adapter-wrapped repositories
 	timerService := application.NewTimerService(sessionRepo, activityRepo)
 
+	// Inject the timer service logic into the Hub for welcome messages
+	hub.GetGlobalBalance = func() int {
+		return timerService.CalculateGlobalBalance()
+	}
+
 	// 5. Create Echo instance
 	e := echo.New()
 

@@ -105,6 +105,11 @@ func (s *Store) FindActivityByID(id string) (*domain.ActivityProfile, error) {
 	return repo.FindByID(id)
 }
 
+func (s *Store) SaveActivity(profile *domain.ActivityProfile) error {
+	repo := NewActivityRepoAdapter(s)
+	return repo.Save(profile)
+}
+
 func (s *Store) SaveSession(session *domain.Session) error {
 	repo := NewSessionRepoAdapter(s)
 	return repo.Save(session)

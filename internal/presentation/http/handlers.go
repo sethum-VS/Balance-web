@@ -42,6 +42,8 @@ func (h *Handlers) RegisterRoutes(e *echo.Echo) {
 	// API routes
 	api := e.Group("/api")
 	api.GET("/activities", h.GetActivities)
+	api.POST("/activities", h.CreateActivity)
+	api.POST("/activities/sync", h.SyncActivities)
 	api.POST("/timer/start", h.StartTimer)
 	api.POST("/timer/stop", h.StopTimer)
 	api.POST("/sync", h.SyncSessions)
@@ -251,6 +253,48 @@ func (h *Handlers) SyncSessions(c echo.Context) error {
 	h.hub.Broadcast <- &domain.WSEvent{
 		Type:    domain.EventBalanceUpdated,
 		Payload: map[string]interface{}{"balance": totalBalance},
+	}
+
+	return c.NoContent(http.StatusOK)
+}
+
+// CreateActivity handles POST /api/activities
+func (h *Handlers) CreateActivity(c echo.Context) error {
+	var profile domain.ActivityProfile
+	if err := c.Bind(&profile); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
+
+	if profile.CreatedAt.IsZero() {
+		profile.CreatedAt = time.Now()
+	}
+	if profile.UpdatedAt.IsZero() {
+		profile.UpdatedAt = time.Now()
+	}
+
+	if err := h.store.SaveActivity(&profile); err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	return c.JSON(http.StatusCreated, profile)
+}
+
+// SyncActivities handles POST /api/activities/sync
+func (h *Handlers) SyncActivities(c echo.Context) error {
+	var profiles []domain.ActivityProfile
+	if err := c.Bind(&profiles); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
+
+	for _, profile := range profiles {
+		if profile.CreatedAt.IsZero() {
+			profile.CreatedAt = time.Now()
+		}
+		if profile.UpdatedAt.IsZero() {
+			profile.UpdatedAt = time.Now()
+		}
+		if err := h.store.SaveActivity(&profile); err != nil {
+			log.Printf("[SyncActivities] Failed to save activity %s: %v", profile.ID, err)
+		}
 	}
 
 	return c.NoContent(http.StatusOK)

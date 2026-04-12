@@ -27,11 +27,37 @@ type Handlers struct {
 
 // NewHandlers creates a new Handlers instance with all dependencies.
 func NewHandlers(store *turso.Store, timerService *application.TimerService, hub *websocket.Hub) *Handlers {
-	return &Handlers{
+	h := &Handlers{
 		store:        store,
 		timerService: timerService,
 		hub:          hub,
 	}
+
+	// Register AutoKill listener to broadcast WS messages seamlessly
+	h.timerService.OnAutoStop = func(session *domain.Session) {
+		if h.activeSessionID == session.ID {
+			h.activeSessionID = ""
+		}
+		log.Printf("[AutoKill] Session auto-stopped on 0 CR: id=%s duration=%ds", session.ID, session.Duration)
+
+		h.hub.Broadcast <- &domain.WSEvent{
+			Type: domain.EventTimerStopped,
+			Payload: map[string]interface{}{
+				"sessionID":     session.ID,
+				"duration":      session.Duration,
+				"creditsEarned": session.CreditsEarned,
+			},
+		}
+
+		h.hub.Broadcast <- &domain.WSEvent{
+			Type: domain.EventBalanceUpdated,
+			Payload: map[string]interface{}{
+				"balance": h.timerService.CalculateGlobalBalance(),
+			},
+		}
+	}
+
+	return h
 }
 
 // RegisterRoutes registers all HTTP routes on the Echo instance.
@@ -72,6 +98,24 @@ func (h *Handlers) StartTimer(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "activityID is required")
 	}
 
+	// Look up the activity
+	activity, _ := h.store.FindActivityByID(activityID)
+	activityName := ""
+	activityCategory := ""
+	if activity != nil {
+		activityName = activity.Name
+		activityCategory = string(activity.Category)
+	}
+
+	// Calculate the current global CR balance (base) at session start
+	baseBalance := h.timerService.CalculateGlobalBalance()
+
+	// Pre-Flight Guard: Deny Consume activities if balance is zero or lower
+	if activityCategory == string(domain.ActivityCategoryConsuming) && baseBalance <= 0 {
+		c.Response().Header().Set("HX-Trigger", `{"showError": "Please top up the app first."}`)
+		return c.NoContent(http.StatusNoContent)
+	}
+
 	// If there's already an active session, stop it first
 	if h.activeSessionID != "" {
 		_, err := h.timerService.StopSession(h.activeSessionID)
@@ -86,18 +130,6 @@ func (h *Handlers) StartTimer(c echo.Context) error {
 	}
 
 	h.activeSessionID = session.ID
-
-	// Look up the activity to include its name in the event payload
-	activity, _ := h.store.FindActivityByID(activityID)
-	activityName := ""
-	activityCategory := ""
-	if activity != nil {
-		activityName = activity.Name
-		activityCategory = string(activity.Category)
-	}
-
-	// Calculate the current global CR balance (base) at session start
-	baseBalance := h.timerService.CalculateGlobalBalance()
 
 	// Broadcast TIMER_STARTED event with baseBalance for client-side ticking
 	h.hub.Broadcast <- &domain.WSEvent{

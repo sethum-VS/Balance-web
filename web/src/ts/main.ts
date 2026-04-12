@@ -274,6 +274,7 @@ function tick(): void {
     globalBalance = baseBalance + elapsed;
   } else if (activeCategory === "consuming") {
     globalBalance = baseBalance - elapsed;
+    if (globalBalance <= 0) { globalBalance = 0; }
   }
 
   if (balanceDisplay) {
@@ -332,6 +333,11 @@ document.addEventListener("DOMContentLoaded", () => {
   if (overlay && !overlay.classList.contains("hidden")) {
     handleMobileStatus({ isOnline: false });
   }
+
+  // Handle HTMX Errors
+  document.body.addEventListener("showError", function (evt: any) {
+    alert(evt.detail.value);
+  });
 
   connectWebSocket();
 });

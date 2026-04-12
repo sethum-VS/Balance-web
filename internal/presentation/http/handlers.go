@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
 	"time"
 
 	"balance-web/internal/application"
@@ -204,7 +205,13 @@ func (h *Handlers) IndexHandler(c echo.Context) error {
 	
 	isMobileOnline := h.hub.IsMobileOnline()
 
-	component := templates.Dashboard(activities, balanceStr, isMobileOnline)
+	// Dynamic WS_URL for deployment flexibility
+	wsURL := os.Getenv("WS_URL")
+	if wsURL == "" {
+		wsURL = "auto" // frontend will auto-detect from window.location
+	}
+
+	component := templates.Dashboard(activities, balanceStr, isMobileOnline, wsURL)
 	return Render(c, http.StatusOK, component)
 }
 

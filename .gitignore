@@ -6,6 +6,7 @@ bin/
 
 # Compiled/bundled frontend output
 web/static/css/output.css
+web/static/css/styles.css
 web/static/js/
 
 # Logs

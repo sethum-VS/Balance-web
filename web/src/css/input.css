@@ -1,0 +1,17 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body { font-family: 'Inter', sans-serif; }
+
+.material-symbols-outlined {
+  font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+}
+
+.neumorphic-up {
+  box-shadow: -5px -5px 15px rgba(229, 226, 225, 0.05), 10px 10px 20px rgba(14, 14, 14, 0.4);
+}
+
+.neumorphic-down {
+  box-shadow: inset -2px -2px 5px rgba(229, 226, 225, 0.05), inset 3px 3px 8px rgba(14, 14, 14, 0.4);
+}

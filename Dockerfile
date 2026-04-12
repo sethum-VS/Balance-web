@@ -1,39 +1,50 @@
-# Build stage
+# ── Stage 1: Builder ──
 FROM golang:1.22-alpine AS builder
 
-RUN apk add --no-cache nodejs npm make git
+RUN apk add --no-cache build-base nodejs npm
 
-WORKDIR /app
+WORKDIR /build
 
-# Install Go tools
-RUN go install github.com/a-h/templ/cmd/templ@latest
-
-# Copy dependency files first for caching
+# Copy dependency files first for layer caching
 COPY go.mod go.sum ./
 RUN go mod download
 
-COPY package.json package-lock.json ./
-RUN npm install
+COPY package.json package-lock.json* ./
+RUN npm ci
 
-# Copy source
+# Copy the rest of the source code
 COPY . .
 
-# Build
-RUN templ generate
-RUN npm run tailwind
-RUN npm run esbuild
-RUN CGO_ENABLED=0 GOOS=linux go build -o /app/bin/server ./cmd/server
+# Generate templ templates
+RUN go run github.com/a-h/templ/cmd/templ@latest generate
 
-# Runtime stage
+# Build Tailwind CSS via CLI
+RUN npx tailwindcss -i web/src/css/input.css -o web/static/css/styles.css --minify
+
+# Bundle TypeScript with esbuild
+RUN go run github.com/evanw/esbuild/cmd/esbuild@latest web/src/ts/main.ts --bundle --outfile=web/static/js/main.js
+
+# Build the Go binary
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o /app/server ./cmd/server
+
+
+# ── Stage 2: Runner ──
 FROM alpine:3.19
 
 RUN apk add --no-cache ca-certificates
 
 WORKDIR /app
 
-COPY --from=builder /app/bin/server .
-COPY --from=builder /app/web/static ./web/static
+# Copy binary from builder
+COPY --from=builder /app/server .
 
+# Copy static assets (CSS, JS, images)
+COPY --from=builder /build/web/static ./web/static
+
+# Expose the application port
 EXPOSE 3000
 
-CMD ["./server"]
+# Use environment variables for configuration
+ENV PORT=3000
+
+ENTRYPOINT ["./server"]

@@ -59,8 +59,15 @@ let btnStopConsume: HTMLElement | null;
 
 // ──────────────────────────── WebSocket ────────────────────────────
 function connectWebSocket(): void {
-  const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-  const wsUrl = `${protocol}//${window.location.host}/ws`;
+  const envWsUrl = document.body.dataset.wsUrl;
+
+  let wsUrl: string;
+  if (envWsUrl && envWsUrl !== "auto") {
+    wsUrl = envWsUrl;
+  } else {
+    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+    wsUrl = `${protocol}//${window.location.host}/ws`;
+  }
 
   ws = new WebSocket(wsUrl);
 

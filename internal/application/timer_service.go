@@ -89,19 +89,7 @@ func (s *TimerService) StopSession(sessionID string) (*domain.Session, error) {
 	return session, nil
 }
 
-// CalculateGlobalBalance sums CreditsEarned across all completed sessions.
+// CalculateGlobalBalance returns the exact current cumulative CR pool via SQL aggregation.
 func (s *TimerService) CalculateGlobalBalance() int {
-	sessions, err := s.sessionRepo.FindAll()
-	if err != nil {
-		log.Printf("[TimerService] Error fetching sessions for balance: %v", err)
-		return 0
-	}
-
-	total := 0
-	for _, sess := range sessions {
-		if sess.Status == domain.SessionStatusCompleted {
-			total += sess.CreditsEarned
-		}
-	}
-	return total
+	return s.sessionRepo.GetTotalBalance()
 }

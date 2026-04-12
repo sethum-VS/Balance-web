@@ -8,7 +8,7 @@ import (
 
 	"balance-web/internal/application"
 	"balance-web/internal/domain"
-	"balance-web/internal/infrastructure/memory"
+	"balance-web/internal/infrastructure/turso"
 	"balance-web/internal/infrastructure/websocket"
 	"balance-web/web/templates"
 
@@ -18,7 +18,7 @@ import (
 
 // Handlers holds dependencies for HTTP request handlers.
 type Handlers struct {
-	store        *memory.Store
+	store        *turso.Store
 	timerService *application.TimerService
 	hub          *websocket.Hub
 	// Track the active session globally (single-user for now)
@@ -26,7 +26,7 @@ type Handlers struct {
 }
 
 // NewHandlers creates a new Handlers instance with all dependencies.
-func NewHandlers(store *memory.Store, timerService *application.TimerService, hub *websocket.Hub) *Handlers {
+func NewHandlers(store *turso.Store, timerService *application.TimerService, hub *websocket.Hub) *Handlers {
 	return &Handlers{
 		store:        store,
 		timerService: timerService,

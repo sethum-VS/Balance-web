@@ -29,4 +29,5 @@ type SessionRepository interface {
 	FindByActivityProfileID(activityProfileID string) ([]*Session, error)
 	Save(session *Session) error
 	Delete(id string) error
+	GetTotalBalance() int
 }

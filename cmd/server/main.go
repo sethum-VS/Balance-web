@@ -6,7 +6,7 @@ import (
 	"os"
 
 	"balance-web/internal/application"
-	"balance-web/internal/infrastructure/memory"
+	"balance-web/internal/infrastructure/turso"
 	"balance-web/internal/infrastructure/websocket"
 	httphandlers "balance-web/internal/presentation/http"
 	wshandlers "balance-web/internal/presentation/ws"
@@ -27,12 +27,12 @@ func main() {
 		port = "3000"
 	}
 
-	// 1. Initialize In-Memory Store (auto-seeds mock data)
-	store := memory.NewStore()
+	// 1. Initialize Turso Store (auto-seeds mock data if empty)
+	store := turso.NewStore()
 
-	// 2. Create repository adapters that satisfy the domain interfaces
-	activityRepo := memory.NewActivityRepoAdapter(store)
-	sessionRepo := memory.NewSessionRepoAdapter(store)
+	// 2. Create turso repository adapters that satisfy the domain interfaces
+	activityRepo := turso.NewActivityRepoAdapter(store)
+	sessionRepo := turso.NewSessionRepoAdapter(store)
 
 	// 3. Initialize WebSocket Hub & Run it concurrently
 	hub := websocket.NewHub()

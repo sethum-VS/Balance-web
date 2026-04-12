@@ -94,16 +94,21 @@ func (s *TimerService) StopSession(sessionID string) (*domain.Session, error) {
 	session.Status = domain.SessionStatusCompleted
 
 	// Calculate exact duration in seconds
-	durationSecs := int(time.Since(session.StartTime).Seconds())
-	session.Duration = durationSecs
+	rawDurationSecs := int(time.Since(session.StartTime).Seconds())
 
-	// Determine credit sign based on activity category
+	// Determine credit sign and clamp limits based on activity category
 	activity, err := s.activityRepo.FindByID(session.ActivityProfileID)
 	if err == nil && activity != nil {
 		if activity.Category == domain.ActivityCategoryToppingUp {
-			session.CreditsEarned = durationSecs // +N CR
+			session.Duration = rawDurationSecs
+			session.CreditsEarned = rawDurationSecs // +N CR
 		} else if activity.Category == domain.ActivityCategoryConsuming {
-			session.CreditsEarned = -durationSecs // -N CR
+			availableBalance := s.CalculateGlobalBalance()
+			if rawDurationSecs > availableBalance {
+				rawDurationSecs = availableBalance
+			}
+			session.Duration = rawDurationSecs
+			session.CreditsEarned = -rawDurationSecs // -N CR
 		}
 	}
 

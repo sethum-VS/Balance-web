@@ -20,15 +20,18 @@ jobs:
         id: auth
         uses: google-github-actions/auth@v2
         with:
-          workload_identity_provider: ${{ secrets.WIF_PROVIDER_NAME }}
-          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.GCP_SA_EMAIL }}
+
+      - name: Setup GCloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ secrets.GCP_PROJECT_ID }}
 
       - name: Deploy to Cloud Run
-        id: deploy
-        uses: google-github-actions/deploy-cloudrun@v2
-        with:
-          service: balance-web
-          region: us-central1
-          source: .
-          env_vars: |
-            TURSO_AUTH_TOKEN=${{ secrets.TURSO_AUTH_TOKEN }}
+        run: |
+          gcloud run deploy balance-web \
+            --source . \
+            --region ${{ secrets.GCP_REGION }} \
+            --allow-unauthenticated \
+            --set-env-vars="TURSO_AUTH_TOKEN=${{ secrets.TURSO_AUTH_TOKEN }}"

@@ -74,10 +74,17 @@ func NewHandlers(store *turso.Store, activityRepo *turso.ActivityRepoAdapter, se
 // RegisterRoutes registers all HTTP routes on the Echo instance.
 func (h *Handlers) RegisterRoutes(e *echo.Echo) {
 	// Public routes (no auth)
-	e.GET("/", h.IndexHandler)
+	e.GET("/login", h.LoginHandler)
 	e.GET("/health", h.HealthHandler)
 
-	// Protected API routes
+	// Session cookie exchange (must be unprotected — exchanging token for cookie)
+	e.POST("/api/auth/session", h.CreateSession)
+
+	// Page routes protected by redirect-based auth
+	pageAuth := PageAuthMiddleware(h.firebaseAuth)
+	e.GET("/", h.IndexHandler, pageAuth)
+
+	// Protected API routes (returns 401 JSON on failure)
 	authMiddleware := FirebaseAuthMiddleware(h.firebaseAuth)
 
 	api := e.Group("/api", authMiddleware)
@@ -87,17 +94,6 @@ func (h *Handlers) RegisterRoutes(e *echo.Echo) {
 	api.POST("/timer/start", h.StartTimer)
 	api.POST("/timer/stop", h.StopTimer)
 	api.POST("/sync", h.SyncSessions)
-
-	// Protected WebSocket route
-	e.GET("/ws", h.wsProxy, authMiddleware)
-}
-
-// wsProxy is a thin proxy that lets auth middleware run before WS upgrade.
-// The actual WS handler is registered separately in main.go via wshandlers.
-// This route is overridden in main.go — it exists here to show the pattern.
-func (h *Handlers) wsProxy(c echo.Context) error {
-	// This will never be called — the WS route in main.go takes precedence
-	return c.NoContent(http.StatusOK)
 }
 
 // HealthHandler returns a simple JSON health check response.
@@ -222,11 +218,66 @@ func (h *Handlers) StopTimer(c echo.Context) error {
 	return c.NoContent(http.StatusNoContent)
 }
 
-// IndexHandler renders the dashboard with activity data.
+// LoginHandler renders the login page with Firebase config.
+func (h *Handlers) LoginHandler(c echo.Context) error {
+	config := templates.FirebaseConfig{
+		APIKey:            os.Getenv("FIREBASE_API_KEY"),
+		AuthDomain:        os.Getenv("FIREBASE_AUTH_DOMAIN"),
+		ProjectID:         os.Getenv("FIREBASE_PROJECT_ID"),
+		StorageBucket:     os.Getenv("FIREBASE_STORAGE_BUCKET"),
+		MessagingSenderID: os.Getenv("FIREBASE_MESSAGING_SENDER_ID"),
+		AppID:             os.Getenv("FIREBASE_APP_ID"),
+	}
+	component := templates.LoginPage(config)
+	return Render(c, http.StatusOK, component)
+}
+
+// CreateSession handles POST /api/auth/session — exchanges a Firebase ID token for an HttpOnly session cookie.
+func (h *Handlers) CreateSession(c echo.Context) error {
+	var req struct {
+		IDToken string `json:"idToken"`
+	}
+	if err := c.Bind(&req); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "invalid request body")
+	}
+
+	// Verify the token is valid
+	_, err := h.firebaseAuth.VerifyToken(req.IDToken)
+	if err != nil {
+		return c.JSON(http.StatusUnauthorized, map[string]string{
+			"error": "invalid Firebase token",
+		})
+	}
+
+	// Create HttpOnly session cookie
+	cookie := new(http.Cookie)
+	cookie.Name = "session_token"
+	cookie.Value = req.IDToken
+	cookie.Expires = time.Now().Add(24 * time.Hour)
+	cookie.HttpOnly = true
+	cookie.Secure = true
+	cookie.Path = "/"
+	c.SetCookie(cookie)
+
+	return c.JSON(http.StatusOK, map[string]string{"status": "ok"})
+}
+
+// IndexHandler renders the dashboard with user-scoped activity data.
 func (h *Handlers) IndexHandler(c echo.Context) error {
-	// Dashboard is public but renders with zero state for unauthenticated users.
-	// Actual data comes via authenticated WS/API calls.
+	userID := c.Get("user_id").(string)
+
+	activities, err := h.activityRepo.FindAll(userID)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+
+	// Calculate user-scoped balance
+	totalBalance := h.timerService.CalculateGlobalBalance(userID)
 	balanceStr := "0"
+	if totalBalance > 0 {
+		balanceStr = formatBalance(totalBalance)
+	}
+
 	isMobileOnline := h.hub.IsMobileOnline()
 
 	// Dynamic WS_URL for deployment flexibility
@@ -235,7 +286,7 @@ func (h *Handlers) IndexHandler(c echo.Context) error {
 		wsURL = "auto" // frontend will auto-detect from window.location
 	}
 
-	component := templates.Dashboard(nil, balanceStr, isMobileOnline, wsURL)
+	component := templates.Dashboard(activities, balanceStr, isMobileOnline, wsURL)
 	return Render(c, http.StatusOK, component)
 }
 

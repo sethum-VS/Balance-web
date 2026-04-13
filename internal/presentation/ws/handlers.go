@@ -12,6 +12,12 @@ import (
 	"github.com/labstack/echo/v4"
 )
 
+const (
+	writeWait  = 10 * time.Second
+	pongWait   = 60 * time.Second
+	pingPeriod = (pongWait * 9) / 10
+)
+
 var upgrader = websocket.Upgrader{
 	ReadBufferSize:  1024,
 	WriteBufferSize: 1024,
@@ -65,6 +71,11 @@ func (h *Handlers) ServeWS(c echo.Context) error {
 }
 
 func (h *Handlers) readPump(client *infrastructure.Client, conn *websocket.Conn) {
+	conn.SetReadDeadline(time.Now().Add(pongWait))
+	conn.SetPongHandler(func(string) error {
+		return conn.SetReadDeadline(time.Now().Add(pongWait))
+	})
+
 	defer func() {
 		h.hub.Unregister <- client
 		conn.Close()
@@ -81,7 +92,7 @@ func (h *Handlers) readPump(client *infrastructure.Client, conn *websocket.Conn)
 }
 
 func (h *Handlers) writePump(client *infrastructure.Client, conn *websocket.Conn) {
-	ticker := time.NewTicker(54 * time.Second)
+	ticker := time.NewTicker(pingPeriod)
 	defer func() {
 		ticker.Stop()
 		conn.Close()
@@ -90,7 +101,7 @@ func (h *Handlers) writePump(client *infrastructure.Client, conn *websocket.Conn
 	for {
 		select {
 		case message, ok := <-client.Send:
-			conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
+			conn.SetWriteDeadline(time.Now().Add(writeWait))
 			if !ok {
 				conn.WriteMessage(websocket.CloseMessage, []byte{})
 				return
@@ -100,7 +111,7 @@ func (h *Handlers) writePump(client *infrastructure.Client, conn *websocket.Conn
 				return
 			}
 		case <-ticker.C:
-			conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
+			conn.SetWriteDeadline(time.Now().Add(writeWait))
 			if err := conn.WriteMessage(websocket.PingMessage, nil); err != nil {
 				return
 			}

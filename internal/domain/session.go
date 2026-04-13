@@ -14,6 +14,7 @@ const (
 // Session represents a time/credit tracking session tied to an activity profile.
 type Session struct {
 	ID                string        `json:"id"`
+	UserID            string        `json:"user_id"`
 	ActivityProfileID string        `json:"activity_profile_id"`
 	Status            SessionStatus `json:"status"`
 	StartTime         time.Time     `json:"start_time"`
@@ -24,10 +25,10 @@ type Session struct {
 
 // SessionRepository defines the interface for session persistence.
 type SessionRepository interface {
-	FindByID(id string) (*Session, error)
-	FindAll() ([]*Session, error)
-	FindByActivityProfileID(activityProfileID string) ([]*Session, error)
-	Save(session *Session) error
-	Delete(id string) error
-	GetTotalBalance() int
+	FindByID(userID, id string) (*Session, error)
+	FindAll(userID string) ([]*Session, error)
+	FindByActivityProfileID(userID, activityProfileID string) ([]*Session, error)
+	Save(userID string, session *Session) error
+	Delete(userID, id string) error
+	GetTotalBalance(userID string) int
 }

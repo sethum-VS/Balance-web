@@ -15,7 +15,7 @@ type TimerService struct {
 	activityRepo   domain.ActivityProfileRepository
 	autoStopTimers map[string]*time.Timer
 	mu             sync.Mutex
-	OnAutoStop     func(session *domain.Session)
+	OnAutoStop     func(userID string, session *domain.Session)
 }
 
 // NewTimerService creates a new TimerService with the given repositories.
@@ -28,8 +28,8 @@ func NewTimerService(sr domain.SessionRepository, ar domain.ActivityProfileRepos
 }
 
 // StartSession begins a new time-tracking session for the given activity profile.
-func (s *TimerService) StartSession(activityProfileID string) (*domain.Session, error) {
-	activity, err := s.activityRepo.FindByID(activityProfileID)
+func (s *TimerService) StartSession(userID, activityProfileID string) (*domain.Session, error) {
+	activity, err := s.activityRepo.FindByID(userID, activityProfileID)
 	if err != nil {
 		return nil, fmt.Errorf("activity profile not found: %w", err)
 	}
@@ -39,25 +39,26 @@ func (s *TimerService) StartSession(activityProfileID string) (*domain.Session, 
 
 	session := &domain.Session{
 		ID:                fmt.Sprintf("sess_%d", time.Now().UnixNano()),
+		UserID:            userID,
 		ActivityProfileID: activityProfileID,
 		Status:            domain.SessionStatusActive,
 		StartTime:         time.Now(),
 	}
 
-	if err := s.sessionRepo.Save(session); err != nil {
+	if err := s.sessionRepo.Save(userID, session); err != nil {
 		return nil, fmt.Errorf("failed to save session: %w", err)
 	}
 
 	// --- Auto-Kill Switch for Consuming Activities ---
 	if activity.Category == domain.ActivityCategoryConsuming {
-		currentBalance := s.CalculateGlobalBalance()
+		currentBalance := s.CalculateGlobalBalance(userID)
 		if currentBalance > 0 {
 			s.mu.Lock()
 			s.autoStopTimers[session.ID] = time.AfterFunc(time.Duration(currentBalance)*time.Second, func() {
 				// Stop the session automatically
-				stoppedSess, err := s.StopSession(session.ID)
+				stoppedSess, err := s.StopSession(userID, session.ID)
 				if err == nil && s.OnAutoStop != nil {
-					s.OnAutoStop(stoppedSess)
+					s.OnAutoStop(userID, stoppedSess)
 				}
 			})
 			s.mu.Unlock()
@@ -69,7 +70,7 @@ func (s *TimerService) StartSession(activityProfileID string) (*domain.Session, 
 
 // StopSession ends an active session and calculates earned credits.
 // Rule: 1 Second = 1 CR. ToppingUp earns positive, Consuming earns negative.
-func (s *TimerService) StopSession(sessionID string) (*domain.Session, error) {
+func (s *TimerService) StopSession(userID, sessionID string) (*domain.Session, error) {
 	// Cancel any auto-stop timer associated
 	s.mu.Lock()
 	if timer, ok := s.autoStopTimers[sessionID]; ok {
@@ -78,7 +79,7 @@ func (s *TimerService) StopSession(sessionID string) (*domain.Session, error) {
 	}
 	s.mu.Unlock()
 
-	session, err := s.sessionRepo.FindByID(sessionID)
+	session, err := s.sessionRepo.FindByID(userID, sessionID)
 	if err != nil {
 		return nil, fmt.Errorf("session not found: %w", err)
 	}
@@ -97,13 +98,13 @@ func (s *TimerService) StopSession(sessionID string) (*domain.Session, error) {
 	rawDurationSecs := int(time.Since(session.StartTime).Seconds())
 
 	// Determine credit sign and clamp limits based on activity category
-	activity, err := s.activityRepo.FindByID(session.ActivityProfileID)
+	activity, err := s.activityRepo.FindByID(userID, session.ActivityProfileID)
 	if err == nil && activity != nil {
 		if activity.Category == domain.ActivityCategoryToppingUp {
 			session.Duration = rawDurationSecs
 			session.CreditsEarned = rawDurationSecs // +N CR
 		} else if activity.Category == domain.ActivityCategoryConsuming {
-			availableBalance := s.CalculateGlobalBalance()
+			availableBalance := s.CalculateGlobalBalance(userID)
 			if rawDurationSecs > availableBalance {
 				rawDurationSecs = availableBalance
 			}
@@ -112,11 +113,11 @@ func (s *TimerService) StopSession(sessionID string) (*domain.Session, error) {
 		}
 	}
 
-	log.Printf("[TimerService] StopSession: id=%s duration=%ds credits=%d category=%s",
-		session.ID, session.Duration, session.CreditsEarned, activity.Category)
+	log.Printf("[TimerService] StopSession: user=%s id=%s duration=%ds credits=%d category=%s",
+		userID, session.ID, session.Duration, session.CreditsEarned, activity.Category)
 
 	// Persist the completed session with calculated credits
-	if err := s.sessionRepo.Save(session); err != nil {
+	if err := s.sessionRepo.Save(userID, session); err != nil {
 		return nil, fmt.Errorf("failed to save session: %w", err)
 	}
 
@@ -124,6 +125,6 @@ func (s *TimerService) StopSession(sessionID string) (*domain.Session, error) {
 }
 
 // CalculateGlobalBalance returns the exact current cumulative CR pool via SQL aggregation.
-func (s *TimerService) CalculateGlobalBalance() int {
-	return s.sessionRepo.GetTotalBalance()
+func (s *TimerService) CalculateGlobalBalance(userID string) int {
+	return s.sessionRepo.GetTotalBalance(userID)
 }

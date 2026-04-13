@@ -9,6 +9,7 @@ import (
 
 	"balance-web/internal/application"
 	"balance-web/internal/domain"
+	"balance-web/internal/infrastructure/auth"
 	"balance-web/internal/infrastructure/turso"
 	"balance-web/internal/infrastructure/websocket"
 	"balance-web/web/templates"
@@ -20,26 +21,33 @@ import (
 // Handlers holds dependencies for HTTP request handlers.
 type Handlers struct {
 	store        *turso.Store
+	activityRepo *turso.ActivityRepoAdapter
+	sessionRepo  *turso.SessionRepoAdapter
 	timerService *application.TimerService
 	hub          *websocket.Hub
-	// Track the active session globally (single-user for now)
-	activeSessionID string
+	firebaseAuth *auth.FirebaseAuth
+	// Track the active session per user
+	activeSessions map[string]string // userID -> sessionID
 }
 
 // NewHandlers creates a new Handlers instance with all dependencies.
-func NewHandlers(store *turso.Store, timerService *application.TimerService, hub *websocket.Hub) *Handlers {
+func NewHandlers(store *turso.Store, activityRepo *turso.ActivityRepoAdapter, sessionRepo *turso.SessionRepoAdapter, timerService *application.TimerService, hub *websocket.Hub, firebaseAuth *auth.FirebaseAuth) *Handlers {
 	h := &Handlers{
-		store:        store,
-		timerService: timerService,
-		hub:          hub,
+		store:          store,
+		activityRepo:   activityRepo,
+		sessionRepo:    sessionRepo,
+		timerService:   timerService,
+		hub:            hub,
+		firebaseAuth:   firebaseAuth,
+		activeSessions: make(map[string]string),
 	}
 
-	// Register AutoKill listener to broadcast WS messages seamlessly
-	h.timerService.OnAutoStop = func(session *domain.Session) {
-		if h.activeSessionID == session.ID {
-			h.activeSessionID = ""
+	// Register AutoKill listener to broadcast user-scoped WS messages
+	h.timerService.OnAutoStop = func(userID string, session *domain.Session) {
+		if activeID, ok := h.activeSessions[userID]; ok && activeID == session.ID {
+			delete(h.activeSessions, userID)
 		}
-		log.Printf("[AutoKill] Session auto-stopped on 0 CR: id=%s duration=%ds", session.ID, session.Duration)
+		log.Printf("[AutoKill] Session auto-stopped on 0 CR: user=%s id=%s duration=%ds", userID, session.ID, session.Duration)
 
 		h.hub.Broadcast <- &domain.WSEvent{
 			Type: domain.EventTimerStopped,
@@ -48,13 +56,15 @@ func NewHandlers(store *turso.Store, timerService *application.TimerService, hub
 				"duration":      session.Duration,
 				"creditsEarned": session.CreditsEarned,
 			},
+			UserID: userID,
 		}
 
 		h.hub.Broadcast <- &domain.WSEvent{
 			Type: domain.EventBalanceUpdated,
 			Payload: map[string]interface{}{
-				"balance": h.timerService.CalculateGlobalBalance(),
+				"balance": h.timerService.CalculateGlobalBalance(userID),
 			},
+			UserID: userID,
 		}
 	}
 
@@ -63,17 +73,31 @@ func NewHandlers(store *turso.Store, timerService *application.TimerService, hub
 
 // RegisterRoutes registers all HTTP routes on the Echo instance.
 func (h *Handlers) RegisterRoutes(e *echo.Echo) {
+	// Public routes (no auth)
 	e.GET("/", h.IndexHandler)
 	e.GET("/health", h.HealthHandler)
 
-	// API routes
-	api := e.Group("/api")
+	// Protected API routes
+	authMiddleware := FirebaseAuthMiddleware(h.firebaseAuth)
+
+	api := e.Group("/api", authMiddleware)
 	api.GET("/activities", h.GetActivities)
 	api.POST("/activities", h.CreateActivity)
 	api.POST("/activities/sync", h.SyncActivities)
 	api.POST("/timer/start", h.StartTimer)
 	api.POST("/timer/stop", h.StopTimer)
 	api.POST("/sync", h.SyncSessions)
+
+	// Protected WebSocket route
+	e.GET("/ws", h.wsProxy, authMiddleware)
+}
+
+// wsProxy is a thin proxy that lets auth middleware run before WS upgrade.
+// The actual WS handler is registered separately in main.go via wshandlers.
+// This route is overridden in main.go — it exists here to show the pattern.
+func (h *Handlers) wsProxy(c echo.Context) error {
+	// This will never be called — the WS route in main.go takes precedence
+	return c.NoContent(http.StatusOK)
 }
 
 // HealthHandler returns a simple JSON health check response.
@@ -83,9 +107,11 @@ func (h *Handlers) HealthHandler(c echo.Context) error {
 	})
 }
 
-// GetActivities returns all seeded ActivityProfiles from the store as JSON.
+// GetActivities returns all ActivityProfiles for the authenticated user.
 func (h *Handlers) GetActivities(c echo.Context) error {
-	activities, err := h.store.FindAllActivities()
+	userID := c.Get("user_id").(string)
+
+	activities, err := h.activityRepo.FindAll(userID)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
@@ -94,13 +120,15 @@ func (h *Handlers) GetActivities(c echo.Context) error {
 
 // StartTimer handles POST /api/timer/start?activityID=xxx
 func (h *Handlers) StartTimer(c echo.Context) error {
+	userID := c.Get("user_id").(string)
+
 	activityID := c.QueryParam("activityID")
 	if activityID == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "activityID is required")
 	}
 
 	// Look up the activity
-	activity, _ := h.store.FindActivityByID(activityID)
+	activity, _ := h.activityRepo.FindByID(userID, activityID)
 	activityName := ""
 	activityCategory := ""
 	if activity != nil {
@@ -109,7 +137,7 @@ func (h *Handlers) StartTimer(c echo.Context) error {
 	}
 
 	// Calculate the current global CR balance (base) at session start
-	baseBalance := h.timerService.CalculateGlobalBalance()
+	baseBalance := h.timerService.CalculateGlobalBalance(userID)
 
 	// Pre-Flight Guard: Deny Consume activities if balance is zero or lower
 	if activityCategory == string(domain.ActivityCategoryConsuming) && baseBalance <= 0 {
@@ -117,22 +145,22 @@ func (h *Handlers) StartTimer(c echo.Context) error {
 		return c.NoContent(http.StatusNoContent)
 	}
 
-	// If there's already an active session, stop it first
-	if h.activeSessionID != "" {
-		_, err := h.timerService.StopSession(h.activeSessionID)
+	// If there's already an active session for this user, stop it first
+	if activeID, ok := h.activeSessions[userID]; ok && activeID != "" {
+		_, err := h.timerService.StopSession(userID, activeID)
 		if err != nil {
 			log.Printf("Error auto-stopping previous session: %v", err)
 		}
 	}
 
-	session, err := h.timerService.StartSession(activityID)
+	session, err := h.timerService.StartSession(userID, activityID)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 
-	h.activeSessionID = session.ID
+	h.activeSessions[userID] = session.ID
 
-	// Broadcast TIMER_STARTED event with baseBalance for client-side ticking
+	// Broadcast user-scoped TIMER_STARTED event with baseBalance for client-side ticking
 	h.hub.Broadcast <- &domain.WSEvent{
 		Type: domain.EventTimerStarted,
 		Payload: map[string]interface{}{
@@ -143,6 +171,7 @@ func (h *Handlers) StartTimer(c echo.Context) error {
 			"startTime":        session.StartTime,
 			"baseBalance":      baseBalance,
 		},
+		UserID: userID,
 	}
 
 	return c.NoContent(http.StatusNoContent)
@@ -150,21 +179,24 @@ func (h *Handlers) StartTimer(c echo.Context) error {
 
 // StopTimer handles POST /api/timer/stop
 func (h *Handlers) StopTimer(c echo.Context) error {
-	if h.activeSessionID == "" {
+	userID := c.Get("user_id").(string)
+
+	activeID, ok := h.activeSessions[userID]
+	if !ok || activeID == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "no active session")
 	}
 
-	session, err := h.timerService.StopSession(h.activeSessionID)
+	session, err := h.timerService.StopSession(userID, activeID)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 
-	h.activeSessionID = ""
+	delete(h.activeSessions, userID)
 
-	log.Printf("[StopTimer] Session stopped: id=%s duration=%ds credits=%d",
-		session.ID, session.Duration, session.CreditsEarned)
+	log.Printf("[StopTimer] Session stopped: user=%s id=%s duration=%ds credits=%d",
+		userID, session.ID, session.Duration, session.CreditsEarned)
 
-	// Broadcast TIMER_STOPPED immediately
+	// Broadcast user-scoped TIMER_STOPPED
 	h.hub.Broadcast <- &domain.WSEvent{
 		Type: domain.EventTimerStopped,
 		Payload: map[string]interface{}{
@@ -172,17 +204,19 @@ func (h *Handlers) StopTimer(c echo.Context) error {
 			"duration":      session.Duration,
 			"creditsEarned": session.CreditsEarned,
 		},
+		UserID: userID,
 	}
 
-	// Immediately follow with BALANCE_UPDATED so clients sync to final CR
-	totalBalance := h.timerService.CalculateGlobalBalance()
-	log.Printf("[StopTimer] Global balance after stop: %d CR", totalBalance)
+	// Immediately follow with user-scoped BALANCE_UPDATED
+	totalBalance := h.timerService.CalculateGlobalBalance(userID)
+	log.Printf("[StopTimer] Balance after stop: user=%s balance=%d CR", userID, totalBalance)
 
 	h.hub.Broadcast <- &domain.WSEvent{
 		Type: domain.EventBalanceUpdated,
 		Payload: map[string]interface{}{
 			"balance": totalBalance,
 		},
+		UserID: userID,
 	}
 
 	return c.NoContent(http.StatusNoContent)
@@ -190,19 +224,9 @@ func (h *Handlers) StopTimer(c echo.Context) error {
 
 // IndexHandler renders the dashboard with activity data.
 func (h *Handlers) IndexHandler(c echo.Context) error {
-	activities, err := h.store.FindAllActivities()
-	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
-	}
-
-	// Calculate current balance from completed sessions
-	totalBalance := h.timerService.CalculateGlobalBalance()
-
+	// Dashboard is public but renders with zero state for unauthenticated users.
+	// Actual data comes via authenticated WS/API calls.
 	balanceStr := "0"
-	if totalBalance > 0 {
-		balanceStr = formatBalance(totalBalance)
-	}
-	
 	isMobileOnline := h.hub.IsMobileOnline()
 
 	// Dynamic WS_URL for deployment flexibility
@@ -211,7 +235,7 @@ func (h *Handlers) IndexHandler(c echo.Context) error {
 		wsURL = "auto" // frontend will auto-detect from window.location
 	}
 
-	component := templates.Dashboard(activities, balanceStr, isMobileOnline, wsURL)
+	component := templates.Dashboard(nil, balanceStr, isMobileOnline, wsURL)
 	return Render(c, http.StatusOK, component)
 }
 
@@ -262,6 +286,8 @@ type SyncPayload struct {
 
 // SyncSessions handles POST /api/sync
 func (h *Handlers) SyncSessions(c echo.Context) error {
+	userID := c.Get("user_id").(string)
+
 	var payloads []SyncPayload
 	if err := c.Bind(&payloads); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
@@ -270,6 +296,7 @@ func (h *Handlers) SyncSessions(c echo.Context) error {
 	for _, payload := range payloads {
 		session := &domain.Session{
 			ID:                fmt.Sprintf("sess_%d", payload.Timestamp.UnixNano()),
+			UserID:            userID,
 			ActivityProfileID: payload.ActivityID,
 			Status:            domain.SessionStatusCompleted,
 			StartTime:         payload.StartTime,
@@ -280,18 +307,19 @@ func (h *Handlers) SyncSessions(c echo.Context) error {
 		now := payload.Timestamp
 		session.EndTime = &now
 
-		if err := h.store.SaveSession(session); err != nil {
+		if err := h.sessionRepo.Save(userID, session); err != nil {
 			log.Printf("[SyncSessions] Failed to save session %s: %v", session.ID, err)
 			continue
 		}
 	}
 
-	totalBalance := h.timerService.CalculateGlobalBalance()
-	log.Printf("[SyncSessions] Sync processed %d sessions. New global balance: %d CR", len(payloads), totalBalance)
+	totalBalance := h.timerService.CalculateGlobalBalance(userID)
+	log.Printf("[SyncSessions] user=%s synced %d sessions. Balance: %d CR", userID, len(payloads), totalBalance)
 
 	h.hub.Broadcast <- &domain.WSEvent{
 		Type:    domain.EventBalanceUpdated,
 		Payload: map[string]interface{}{"balance": totalBalance},
+		UserID:  userID,
 	}
 
 	return c.NoContent(http.StatusOK)
@@ -299,10 +327,14 @@ func (h *Handlers) SyncSessions(c echo.Context) error {
 
 // CreateActivity handles POST /api/activities
 func (h *Handlers) CreateActivity(c echo.Context) error {
+	userID := c.Get("user_id").(string)
+
 	var profile domain.ActivityProfile
 	if err := c.Bind(&profile); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
+
+	profile.UserID = userID
 
 	if profile.CreatedAt.IsZero() {
 		profile.CreatedAt = time.Now()
@@ -311,7 +343,7 @@ func (h *Handlers) CreateActivity(c echo.Context) error {
 		profile.UpdatedAt = time.Now()
 	}
 
-	if err := h.store.SaveActivity(&profile); err != nil {
+	if err := h.activityRepo.Save(userID, &profile); err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 	return c.JSON(http.StatusCreated, profile)
@@ -319,19 +351,22 @@ func (h *Handlers) CreateActivity(c echo.Context) error {
 
 // SyncActivities handles POST /api/activities/sync
 func (h *Handlers) SyncActivities(c echo.Context) error {
+	userID := c.Get("user_id").(string)
+
 	var profiles []domain.ActivityProfile
 	if err := c.Bind(&profiles); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
 
 	for _, profile := range profiles {
+		profile.UserID = userID
 		if profile.CreatedAt.IsZero() {
 			profile.CreatedAt = time.Now()
 		}
 		if profile.UpdatedAt.IsZero() {
 			profile.UpdatedAt = time.Now()
 		}
-		if err := h.store.SaveActivity(&profile); err != nil {
+		if err := h.activityRepo.Save(userID, &profile); err != nil {
 			log.Printf("[SyncActivities] Failed to save activity %s: %v", profile.ID, err)
 		}
 	}

@@ -13,6 +13,7 @@ const (
 // ActivityProfile represents a configurable activity profile.
 type ActivityProfile struct {
 	ID            string           `json:"id"`
+	UserID        string           `json:"user_id"`
 	Name          string           `json:"name"`
 	Category      ActivityCategory `json:"category"`
 	IconName      string           `json:"icon_name"`
@@ -23,8 +24,8 @@ type ActivityProfile struct {
 
 // ActivityProfileRepository defines the interface for activity persistence.
 type ActivityProfileRepository interface {
-	FindByID(id string) (*ActivityProfile, error)
-	FindAll() ([]*ActivityProfile, error)
-	Save(activityProfile *ActivityProfile) error
-	Delete(id string) error
+	FindByID(userID, id string) (*ActivityProfile, error)
+	FindAll(userID string) ([]*ActivityProfile, error)
+	Save(userID string, activityProfile *ActivityProfile) error
+	Delete(userID, id string) error
 }

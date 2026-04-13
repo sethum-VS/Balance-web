@@ -6,6 +6,7 @@ import (
 	"os"
 
 	"balance-web/internal/application"
+	"balance-web/internal/infrastructure/auth"
 	"balance-web/internal/infrastructure/turso"
 	"balance-web/internal/infrastructure/websocket"
 	httphandlers "balance-web/internal/presentation/http"
@@ -27,26 +28,29 @@ func main() {
 		port = "3000"
 	}
 
-	// 1. Initialize Turso Store (auto-seeds mock data if empty)
+	// 1. Initialize Firebase Auth
+	firebaseAuth := auth.NewFirebaseAuth()
+
+	// 2. Initialize Turso Store (auto-migrates schema)
 	store := turso.NewStore()
 
-	// 2. Create turso repository adapters that satisfy the domain interfaces
+	// 3. Create turso repository adapters that satisfy the domain interfaces
 	activityRepo := turso.NewActivityRepoAdapter(store)
 	sessionRepo := turso.NewSessionRepoAdapter(store)
 
-	// 3. Initialize WebSocket Hub & Run it concurrently
+	// 4. Initialize WebSocket Hub & Run it concurrently
 	hub := websocket.NewHub()
 	go hub.Run()
 
-	// 4. Initialize TimerService with the adapter-wrapped repositories
+	// 5. Initialize TimerService with the adapter-wrapped repositories
 	timerService := application.NewTimerService(sessionRepo, activityRepo)
 
-	// Inject the timer service logic into the Hub for welcome messages
-	hub.GetGlobalBalance = func() int {
-		return timerService.CalculateGlobalBalance()
+	// Inject the user-scoped timer service logic into the Hub for welcome messages
+	hub.GetGlobalBalance = func(userID string) int {
+		return timerService.CalculateGlobalBalance(userID)
 	}
 
-	// 5. Create Echo instance
+	// 6. Create Echo instance
 	e := echo.New()
 
 	// Middleware
@@ -56,13 +60,14 @@ func main() {
 	// Serve static files from the web/static directory
 	e.Static("/static", "web/static")
 
-	// 6. Instantiate & Register HTTP routes
-	httpH := httphandlers.NewHandlers(store, timerService, hub)
+	// 7. Instantiate & Register HTTP routes (includes auth middleware for /api/*)
+	httpH := httphandlers.NewHandlers(store, activityRepo, sessionRepo, timerService, hub, firebaseAuth)
 	httpH.RegisterRoutes(e)
 
-	// 7. Instantiate & Register WebSocket routes
+	// 8. Instantiate WebSocket handlers and register with auth middleware
 	wsH := wshandlers.NewHandlers(hub)
-	wsH.RegisterRoutes(e)
+	authMW := httphandlers.FirebaseAuthMiddleware(firebaseAuth)
+	e.GET("/ws", wsH.ServeWS, authMW)
 
 	// Start server
 	address := fmt.Sprintf(":%s", port)

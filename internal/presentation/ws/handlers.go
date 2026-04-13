@@ -55,8 +55,15 @@ func (h *Handlers) ServeWS(c echo.Context) error {
 		deviceType = "web"
 	}
 
+	// Extract authenticated user ID from middleware context
+	userID := ""
+	if uid, ok := c.Get("user_id").(string); ok {
+		userID = uid
+	}
+
 	client := &infrastructure.Client{
 		ID:         conn.RemoteAddr().String(),
+		UserID:     userID,
 		DeviceType: deviceType,
 		Send:       make(chan *domain.WSEvent, 256),
 	}

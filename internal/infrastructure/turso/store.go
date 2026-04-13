@@ -4,9 +4,6 @@ import (
 	"database/sql"
 	"log"
 	"os"
-	"time"
-
-	"balance-web/internal/domain"
 
 	"github.com/joho/godotenv"
 	_ "github.com/tursodatabase/libsql-client-go/libsql"
@@ -32,29 +29,46 @@ func NewStore() *Store {
 		log.Fatalf("failed to connect to db %s: %v", url, err)
 	}
 
-	// Auto-Migration
+	// Auto-Migration: Drop and recreate tables with user_id column
+	// WARNING: This is a breaking migration — all existing data will be lost.
+	dropActivityTable := `DROP TABLE IF EXISTS activity_profiles;`
+	dropSessionTable := `DROP TABLE IF EXISTS sessions;`
+
 	createActivityTable := `
 	CREATE TABLE IF NOT EXISTS activity_profiles (
-		id TEXT PRIMARY KEY,
+		id TEXT NOT NULL,
+		user_id TEXT NOT NULL,
 		name TEXT,
 		category TEXT,
 		icon_name TEXT,
 		credit_per_hour REAL,
 		created_at DATETIME,
-		updated_at DATETIME
+		updated_at DATETIME,
+		PRIMARY KEY (id, user_id)
 	);`
 
 	createSessionTable := `
 	CREATE TABLE IF NOT EXISTS sessions (
-		id TEXT PRIMARY KEY,
+		id TEXT NOT NULL,
+		user_id TEXT NOT NULL,
 		activity_profile_id TEXT,
 		status TEXT,
 		start_time DATETIME,
 		end_time DATETIME,
 		duration INTEGER,
 		credits_earned INTEGER,
-		FOREIGN KEY (activity_profile_id) REFERENCES activity_profiles(id)
+		PRIMARY KEY (id, user_id)
 	);`
+
+	_, err = db.Exec(dropActivityTable)
+	if err != nil {
+		log.Fatalf("failed to drop activity_profiles table: %v", err)
+	}
+
+	_, err = db.Exec(dropSessionTable)
+	if err != nil {
+		log.Fatalf("failed to drop sessions table: %v", err)
+	}
 
 	_, err = db.Exec(createActivityTable)
 	if err != nil {
@@ -66,51 +80,6 @@ func NewStore() *Store {
 		log.Fatalf("failed to create sessions table: %v", err)
 	}
 
-	store := &Store{DB: db}
-	store.SeedStore()
-	return store
-}
-
-func (s *Store) SeedStore() {
-	var count int
-	err := s.DB.QueryRow("SELECT COUNT(*) FROM activity_profiles").Scan(&count)
-	if err == nil && count == 0 {
-		log.Println("Seeding Mock Activities into Turso db...")
-		repo := NewActivityRepoAdapter(s)
-		now := time.Now()
-		
-		mocks := []struct{ id, name, cat, icon string; cph float64 }{
-			{"act_1", "Deep Work", "toppingUp", "desktopcomputer", 60.0},
-			{"act_2", "Gym", "toppingUp", "figure.yoga", 30.0},
-			{"act_3", "Social Media", "consuming", "iphone", 0},
-			{"act_4", "Gaming", "consuming", "gamecontroller", 0},
-		}
-		
-		for _, m := range mocks {
-			repo.Save(&domain.ActivityProfile{
-				ID: m.id, Name: m.name, Category: domain.ActivityCategory(m.cat),
-				IconName: m.icon, CreditPerHour: m.cph, CreatedAt: now, UpdatedAt: now,
-			})
-		}
-	}
-}
-
-func (s *Store) FindAllActivities() ([]*domain.ActivityProfile, error) {
-	repo := NewActivityRepoAdapter(s)
-	return repo.FindAll()
-}
-
-func (s *Store) FindActivityByID(id string) (*domain.ActivityProfile, error) {
-	repo := NewActivityRepoAdapter(s)
-	return repo.FindByID(id)
-}
-
-func (s *Store) SaveActivity(profile *domain.ActivityProfile) error {
-	repo := NewActivityRepoAdapter(s)
-	return repo.Save(profile)
-}
-
-func (s *Store) SaveSession(session *domain.Session) error {
-	repo := NewSessionRepoAdapter(s)
-	return repo.Save(session)
+	log.Println("Turso migration complete: tables ready with user_id scoping")
+	return &Store{DB: db}
 }

@@ -8,6 +8,7 @@ import (
 // Client represents a single connected active WebSocket endpoint.
 type Client struct {
 	ID         string
+	UserID     string // Firebase UID — scopes all data to this user
 	DeviceType string
 	Send       chan *domain.WSEvent // Passes event structs instead of raw byte slices
 }
@@ -19,7 +20,7 @@ type Hub struct {
 	Unregister       chan *Client
 	Broadcast        chan *domain.WSEvent
 	mobileCount      int
-	GetGlobalBalance func() int // Callback to fetch absolute truth CR
+	GetGlobalBalance func(userID string) int // Callback to fetch user-scoped CR
 	mu               sync.RWMutex
 }
 
@@ -76,12 +77,13 @@ func (h *Hub) Run() {
 			}
 			h.mu.Unlock()
 
-			// Broadcast absolute true balance immediately to the newly connected client
-			if h.GetGlobalBalance != nil {
+			// Send user-scoped welcome balance to the newly connected client
+			if h.GetGlobalBalance != nil && client.UserID != "" {
+				balance := h.GetGlobalBalance(client.UserID)
 				client.Send <- &domain.WSEvent{
 					Type: domain.EventBalanceUpdated,
 					Payload: map[string]interface{}{
-						"balance": h.GetGlobalBalance(),
+						"balance": balance,
 					},
 				}
 			}
@@ -103,11 +105,15 @@ func (h *Hub) Run() {
 		case message := <-h.Broadcast:
 			h.mu.RLock()
 			for _, client := range h.Clients {
-				select {
-				case client.Send <- message:
-				default:
-					close(client.Send)
-					delete(h.Clients, client.ID)
+				// User-scoped broadcasting: only send to clients belonging to the same user.
+				// If UserID is empty on the event, it's a system-level broadcast (e.g., mobile status).
+				if message.UserID == "" || client.UserID == message.UserID {
+					select {
+					case client.Send <- message:
+					default:
+						close(client.Send)
+						delete(h.Clients, client.ID)
+					}
 				}
 			}
 			h.mu.RUnlock()

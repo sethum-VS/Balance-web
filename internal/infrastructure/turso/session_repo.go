@@ -17,13 +17,13 @@ func NewSessionRepoAdapter(store *Store) *SessionRepoAdapter {
 	return &SessionRepoAdapter{db: store.DB}
 }
 
-func (r *SessionRepoAdapter) FindByID(id string) (*domain.Session, error) {
-	row := r.db.QueryRow("SELECT id, activity_profile_id, status, start_time, end_time, duration, credits_earned FROM sessions WHERE id = ?", id)
+func (r *SessionRepoAdapter) FindByID(userID, id string) (*domain.Session, error) {
+	row := r.db.QueryRow("SELECT id, user_id, activity_profile_id, status, start_time, end_time, duration, credits_earned FROM sessions WHERE user_id = ? AND id = ?", userID, id)
 	return scanSession(row)
 }
 
-func (r *SessionRepoAdapter) FindAll() ([]*domain.Session, error) {
-	rows, err := r.db.Query("SELECT id, activity_profile_id, status, start_time, end_time, duration, credits_earned FROM sessions")
+func (r *SessionRepoAdapter) FindAll(userID string) ([]*domain.Session, error) {
+	rows, err := r.db.Query("SELECT id, user_id, activity_profile_id, status, start_time, end_time, duration, credits_earned FROM sessions WHERE user_id = ?", userID)
 	if err != nil {
 		return nil, err
 	}
@@ -40,8 +40,8 @@ func (r *SessionRepoAdapter) FindAll() ([]*domain.Session, error) {
 	return sessions, nil
 }
 
-func (r *SessionRepoAdapter) FindByActivityProfileID(activityProfileID string) ([]*domain.Session, error) {
-	rows, err := r.db.Query("SELECT id, activity_profile_id, status, start_time, end_time, duration, credits_earned FROM sessions WHERE activity_profile_id = ?", activityProfileID)
+func (r *SessionRepoAdapter) FindByActivityProfileID(userID, activityProfileID string) ([]*domain.Session, error) {
+	rows, err := r.db.Query("SELECT id, user_id, activity_profile_id, status, start_time, end_time, duration, credits_earned FROM sessions WHERE user_id = ? AND activity_profile_id = ?", userID, activityProfileID)
 	if err != nil {
 		return nil, err
 	}
@@ -58,11 +58,11 @@ func (r *SessionRepoAdapter) FindByActivityProfileID(activityProfileID string) (
 	return sessions, nil
 }
 
-func (r *SessionRepoAdapter) Save(s *domain.Session) error {
+func (r *SessionRepoAdapter) Save(userID string, s *domain.Session) error {
 	query := `
-		INSERT INTO sessions (id, activity_profile_id, status, start_time, end_time, duration, credits_earned) 
-		VALUES (?, ?, ?, ?, ?, ?, ?)
-		ON CONFLICT(id) DO UPDATE SET 
+		INSERT INTO sessions (id, user_id, activity_profile_id, status, start_time, end_time, duration, credits_earned) 
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(id, user_id) DO UPDATE SET 
 			status=excluded.status, 
 			end_time=excluded.end_time, 
 			duration=excluded.duration, 
@@ -76,19 +76,19 @@ func (r *SessionRepoAdapter) Save(s *domain.Session) error {
 		endTimeStr = &str
 	}
 	
-	_, err := r.db.Exec(query, s.ID, s.ActivityProfileID, string(s.Status), s.StartTime.Format(time.RFC3339), endTimeStr, s.Duration, s.CreditsEarned)
+	_, err := r.db.Exec(query, s.ID, userID, s.ActivityProfileID, string(s.Status), s.StartTime.Format(time.RFC3339), endTimeStr, s.Duration, s.CreditsEarned)
 	return err
 }
 
-func (r *SessionRepoAdapter) Delete(id string) error {
-	_, err := r.db.Exec("DELETE FROM sessions WHERE id = ?", id)
+func (r *SessionRepoAdapter) Delete(userID, id string) error {
+	_, err := r.db.Exec("DELETE FROM sessions WHERE user_id = ? AND id = ?", userID, id)
 	return err
 }
 
-// GetTotalBalance implements the sum query.
-func (r *SessionRepoAdapter) GetTotalBalance() int {
+// GetTotalBalance implements the sum query scoped by user.
+func (r *SessionRepoAdapter) GetTotalBalance(userID string) int {
 	var total sql.NullInt64
-	err := r.db.QueryRow("SELECT SUM(credits_earned) FROM sessions").Scan(&total)
+	err := r.db.QueryRow("SELECT SUM(credits_earned) FROM sessions WHERE user_id = ?", userID).Scan(&total)
 	if err != nil || !total.Valid {
 		return 0
 	}
@@ -101,7 +101,7 @@ func scanSession(row *sql.Row) (*domain.Session, error) {
 	var startTimeStr string
 	var endTimeStr sql.NullString
 
-	err := row.Scan(&s.ID, &s.ActivityProfileID, &s.Status, &startTimeStr, &endTimeStr, &s.Duration, &s.CreditsEarned)
+	err := row.Scan(&s.ID, &s.UserID, &s.ActivityProfileID, &s.Status, &startTimeStr, &endTimeStr, &s.Duration, &s.CreditsEarned)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, nil // Mimic memory map
@@ -123,7 +123,7 @@ func scanSessionRow(rows *sql.Rows) (*domain.Session, error) {
 	var startTimeStr string
 	var endTimeStr sql.NullString
 
-	err := rows.Scan(&s.ID, &s.ActivityProfileID, &s.Status, &startTimeStr, &endTimeStr, &s.Duration, &s.CreditsEarned)
+	err := rows.Scan(&s.ID, &s.UserID, &s.ActivityProfileID, &s.Status, &startTimeStr, &endTimeStr, &s.Duration, &s.CreditsEarned)
 	if err != nil {
 		return nil, err
 	}

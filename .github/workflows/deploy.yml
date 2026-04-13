@@ -28,10 +28,22 @@ jobs:
         with:
           project_id: ${{ secrets.GCP_PROJECT_ID }}
 
-      - name: Deploy to Cloud Run
+      - name: Build and Deploy to Cloud Run
         run: |
-          gcloud run deploy balance-web \
-            --source . \
-            --region ${{ secrets.GCP_REGION }} \
+          set -euo pipefail
+          
+          SERVICE=balance-web
+          REGION=${{ secrets.GCP_REGION }}
+          PROJECT=${{ secrets.GCP_PROJECT_ID }}
+          IMAGE="gcr.io/$PROJECT/$SERVICE:${{ github.sha }}"
+          
+          # 1. Build the image and push to Container Registry (Logs will show here!)
+          gcloud builds submit --tag "$IMAGE" --project "$PROJECT"
+          
+          # 2. Deploy the newly built image
+          gcloud run deploy "$SERVICE" \
+            --image "$IMAGE" \
+            --region "$REGION" \
+            --project "$PROJECT" \
             --allow-unauthenticated \
             --set-env-vars="TURSO_AUTH_TOKEN=${{ secrets.TURSO_AUTH_TOKEN }}"

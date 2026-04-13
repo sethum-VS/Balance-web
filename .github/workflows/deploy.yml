@@ -35,9 +35,12 @@ jobs:
           SERVICE=balance-web
           REGION=${{ secrets.GCP_REGION }}
           PROJECT=${{ secrets.GCP_PROJECT_ID }}
-          IMAGE="gcr.io/$PROJECT/$SERVICE:${{ github.sha }}"
+          REPO=balance-web
           
-          # 1. Build the image and push to Container Registry (Logs will show here!)
+          # Modern Artifact Registry URL
+          IMAGE="$REGION-docker.pkg.dev/$PROJECT/$REPO/$SERVICE:${{ github.sha }}"
+          
+          # 1. Build the image and push to Artifact Registry
           gcloud builds submit --tag "$IMAGE" --project "$PROJECT"
           
           # 2. Deploy the newly built image

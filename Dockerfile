@@ -16,10 +16,10 @@ RUN npm ci
 COPY . .
 
 # Generate templ templates
-RUN go run github.com/a-h/templ/cmd/templ@latest generate
+RUN go run github.com/a-h/templ/cmd/templ@v0.2.731 generate
 
 # Build Tailwind CSS via CLI
-RUN npx tailwindcss -i web/src/css/input.css -o web/static/css/styles.css --minify
+RUN BROWSERSLIST_IGNORE_OLD_DATA=true npx tailwindcss -i web/src/css/input.css -o web/static/css/styles.css --minify
 
 # Bundle TypeScript with esbuild
 RUN go run github.com/evanw/esbuild/cmd/esbuild@latest web/src/ts/main.ts --bundle --outfile=web/static/js/main.js

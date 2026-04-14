@@ -18,6 +18,7 @@ import (
 
 func main() {
 	// Cloud environments inject variables directly; missing .env must not fail startup.
+	// removed .env port
 	_ = godotenv.Load()
 
 	port := os.Getenv("PORT")

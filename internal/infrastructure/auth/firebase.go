@@ -17,13 +17,12 @@ type FirebaseAuth struct {
 // NewFirebaseAuth initializes the Firebase Admin SDK using the standard
 // GOOGLE_APPLICATION_CREDENTIALS environment variable.
 func NewFirebaseAuth() *FirebaseAuth {
-	ctx := context.Background()
-	app, err := firebase.NewApp(ctx, nil)
+	app, err := firebase.NewApp(context.Background(), nil)
 	if err != nil {
 		log.Fatalf("failed to initialize Firebase app: %v", err)
 	}
 
-	client, err := app.Auth(ctx)
+	client, err := app.Auth(context.Background())
 	if err != nil {
 		log.Fatalf("failed to initialize Firebase Auth client: %v", err)
 	}

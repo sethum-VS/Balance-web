@@ -1,7 +1,6 @@
 package main
 
 import (
-	"fmt"
 	"log"
 	"os"
 
@@ -18,10 +17,8 @@ import (
 )
 
 func main() {
-	// Load environment variables from .env file
-	if err := godotenv.Load(); err != nil {
-		log.Println("No .env file found, using system environment variables")
-	}
+	// Cloud environments inject variables directly; missing .env must not fail startup.
+	_ = godotenv.Load()
 
 	port := os.Getenv("PORT")
 	if port == "" {
@@ -70,7 +67,7 @@ func main() {
 	e.GET("/ws", wsH.ServeWS, authMW)
 
 	// Start server
-	address := fmt.Sprintf(":%s", port)
+	address := ":" + port
 	log.Printf("Balance Web server starting on http://localhost%s\n", address)
 	e.Logger.Fatal(e.Start(address))
 }

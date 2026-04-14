@@ -22,7 +22,7 @@ func main() {
 
 	port := os.Getenv("PORT")
 	if port == "" {
-		port = "3000"
+		port = "8080"
 	}
 
 	// 1. Initialize Firebase Auth
@@ -67,7 +67,7 @@ func main() {
 	e.GET("/ws", wsH.ServeWS, authMW)
 
 	// Start server
-	address := ":" + port
-	log.Printf("Balance Web server starting on http://localhost%s\n", address)
+	address := "0.0.0.0:" + port
+	log.Printf("Balance Web server starting on %s\n", address)
 	e.Logger.Fatal(e.Start(address))
 }

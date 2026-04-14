@@ -42,9 +42,6 @@ COPY --from=builder /app/server .
 COPY --from=builder /build/web/static ./web/static
 
 # Expose the application port
-EXPOSE 3000
-
-# Use environment variables for configuration
-ENV PORT=3000
+EXPOSE 8080
 
 ENTRYPOINT ["./server"]

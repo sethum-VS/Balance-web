@@ -29,10 +29,7 @@ func NewStore() *Store {
 		log.Fatalf("failed to connect to db %s: %v", url, err)
 	}
 
-	// Auto-Migration: Drop and recreate tables with user_id column
-	// WARNING: This is a breaking migration — all existing data will be lost.
-	dropActivityTable := `DROP TABLE IF EXISTS activity_profiles;`
-	dropSessionTable := `DROP TABLE IF EXISTS sessions;`
+	// Auto-migration: ensure required tables exist.
 
 	createActivityTable := `
 	CREATE TABLE IF NOT EXISTS activity_profiles (
@@ -59,16 +56,6 @@ func NewStore() *Store {
 		credits_earned INTEGER,
 		PRIMARY KEY (id, user_id)
 	);`
-
-	_, err = db.Exec(dropActivityTable)
-	if err != nil {
-		log.Fatalf("failed to drop activity_profiles table: %v", err)
-	}
-
-	_, err = db.Exec(dropSessionTable)
-	if err != nil {
-		log.Fatalf("failed to drop sessions table: %v", err)
-	}
 
 	_, err = db.Exec(createActivityTable)
 	if err != nil {

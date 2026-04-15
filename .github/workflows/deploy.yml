@@ -49,4 +49,4 @@ jobs:
             --region "$REGION" \
             --project "$PROJECT" \
             --allow-unauthenticated \
-            --set-env-vars="TURSO_AUTH_TOKEN=${{ secrets.TURSO_AUTH_TOKEN }},WS_URL=wss://balance-web-1047596610069.us-central1.run.app/ws"
+            --set-env-vars="TURSO_AUTH_TOKEN=${{ secrets.TURSO_AUTH_TOKEN }},WS_URL=wss://balance-web-1047596610069.us-central1.run.app/ws,FIREBASE_API_KEY=${{ secrets.FIREBASE_API_KEY }},FIREBASE_AUTH_DOMAIN=${{ secrets.FIREBASE_AUTH_DOMAIN }},FIREBASE_PROJECT_ID=${{ secrets.FIREBASE_PROJECT_ID }}"

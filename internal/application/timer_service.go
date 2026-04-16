@@ -4,6 +4,7 @@ import (
 	"balance-web/internal/domain"
 	"fmt"
 	"log"
+	"strings"
 	"sync"
 	"time"
 )
@@ -29,6 +30,10 @@ func NewTimerService(sr domain.SessionRepository, ar domain.ActivityProfileRepos
 
 // StartSession begins a new time-tracking session for the given activity profile.
 func (s *TimerService) StartSession(userID, activityProfileID string) (*domain.Session, error) {
+	if strings.TrimSpace(userID) == "" {
+		return nil, fmt.Errorf("user_id is required")
+	}
+
 	activity, err := s.activityRepo.FindByID(userID, activityProfileID)
 	if err != nil {
 		return nil, fmt.Errorf("activity profile not found: %w", err)
@@ -71,6 +76,10 @@ func (s *TimerService) StartSession(userID, activityProfileID string) (*domain.S
 // StopSession ends an active session and calculates earned credits.
 // Rule: 1 Second = 1 CR. ToppingUp earns positive, Consuming earns negative.
 func (s *TimerService) StopSession(userID, sessionID string) (*domain.Session, error) {
+	if strings.TrimSpace(userID) == "" {
+		return nil, fmt.Errorf("user_id is required")
+	}
+
 	// Cancel any auto-stop timer associated
 	s.mu.Lock()
 	if timer, ok := s.autoStopTimers[sessionID]; ok {
@@ -126,5 +135,9 @@ func (s *TimerService) StopSession(userID, sessionID string) (*domain.Session, e
 
 // CalculateGlobalBalance returns the exact current cumulative CR pool via SQL aggregation.
 func (s *TimerService) CalculateGlobalBalance(userID string) int {
+	if strings.TrimSpace(userID) == "" {
+		return 0
+	}
+
 	return s.sessionRepo.GetTotalBalance(userID)
 }

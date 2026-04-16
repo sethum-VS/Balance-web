@@ -2,6 +2,8 @@ package turso
 
 import (
 	"database/sql"
+	"fmt"
+	"strings"
 	"time"
 
 	"balance-web/internal/domain"
@@ -17,12 +19,27 @@ func NewSessionRepoAdapter(store *Store) *SessionRepoAdapter {
 	return &SessionRepoAdapter{db: store.DB}
 }
 
+func validateSessionUserID(userID string) error {
+	if strings.TrimSpace(userID) == "" {
+		return fmt.Errorf("user_id is required")
+	}
+	return nil
+}
+
 func (r *SessionRepoAdapter) FindByID(userID, id string) (*domain.Session, error) {
+	if err := validateSessionUserID(userID); err != nil {
+		return nil, err
+	}
+
 	row := r.db.QueryRow("SELECT id, user_id, activity_profile_id, status, start_time, end_time, duration, credits_earned FROM sessions WHERE user_id = ? AND id = ?", userID, id)
 	return scanSession(row)
 }
 
 func (r *SessionRepoAdapter) FindAll(userID string) ([]*domain.Session, error) {
+	if err := validateSessionUserID(userID); err != nil {
+		return nil, err
+	}
+
 	rows, err := r.db.Query("SELECT id, user_id, activity_profile_id, status, start_time, end_time, duration, credits_earned FROM sessions WHERE user_id = ?", userID)
 	if err != nil {
 		return nil, err
@@ -41,6 +58,10 @@ func (r *SessionRepoAdapter) FindAll(userID string) ([]*domain.Session, error) {
 }
 
 func (r *SessionRepoAdapter) FindByActivityProfileID(userID, activityProfileID string) ([]*domain.Session, error) {
+	if err := validateSessionUserID(userID); err != nil {
+		return nil, err
+	}
+
 	rows, err := r.db.Query("SELECT id, user_id, activity_profile_id, status, start_time, end_time, duration, credits_earned FROM sessions WHERE user_id = ? AND activity_profile_id = ?", userID, activityProfileID)
 	if err != nil {
 		return nil, err
@@ -59,6 +80,12 @@ func (r *SessionRepoAdapter) FindByActivityProfileID(userID, activityProfileID s
 }
 
 func (r *SessionRepoAdapter) Save(userID string, s *domain.Session) error {
+	if err := validateSessionUserID(userID); err != nil {
+		return err
+	}
+
+	s.UserID = userID
+
 	query := `
 		INSERT INTO sessions (id, user_id, activity_profile_id, status, start_time, end_time, duration, credits_earned) 
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
@@ -81,12 +108,20 @@ func (r *SessionRepoAdapter) Save(userID string, s *domain.Session) error {
 }
 
 func (r *SessionRepoAdapter) Delete(userID, id string) error {
+	if err := validateSessionUserID(userID); err != nil {
+		return err
+	}
+
 	_, err := r.db.Exec("DELETE FROM sessions WHERE user_id = ? AND id = ?", userID, id)
 	return err
 }
 
 // GetTotalBalance implements the sum query scoped by user.
 func (r *SessionRepoAdapter) GetTotalBalance(userID string) int {
+	if strings.TrimSpace(userID) == "" {
+		return 0
+	}
+
 	var total sql.NullInt64
 	err := r.db.QueryRow("SELECT SUM(credits_earned) FROM sessions WHERE user_id = ?", userID).Scan(&total)
 	if err != nil || !total.Valid {

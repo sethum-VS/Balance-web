@@ -35,6 +35,11 @@ func FirebaseAuthMiddleware(firebaseAuth *auth.FirebaseAuth) echo.MiddlewareFunc
 					"error": "invalid authentication token",
 				})
 			}
+			if strings.TrimSpace(uid) == "" {
+				return c.JSON(http.StatusUnauthorized, map[string]string{
+					"error": "invalid authentication token",
+				})
+			}
 
 			// Inject the authenticated user ID into the Echo context
 			c.Set("user_id", uid)
@@ -56,6 +61,9 @@ func PageAuthMiddleware(firebaseAuth *auth.FirebaseAuth) echo.MiddlewareFunc {
 
 			uid, err := firebaseAuth.VerifyToken(tokenString)
 			if err != nil {
+				return c.Redirect(http.StatusFound, "/login")
+			}
+			if strings.TrimSpace(uid) == "" {
 				return c.Redirect(http.StatusFound, "/login")
 			}
 

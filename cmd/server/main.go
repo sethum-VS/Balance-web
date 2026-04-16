@@ -64,7 +64,7 @@ func main() {
 
 	// 8. Instantiate WebSocket handlers and register with auth middleware
 	wsH := wshandlers.NewHandlers(hub)
-	authMW := httphandlers.FirebaseAuthMiddleware(firebaseAuth)
+	authMW := httphandlers.FirebaseAuthMiddleware(firebaseAuth, store)
 	e.GET("/ws", wsH.ServeWS, authMW)
 
 	// Start server

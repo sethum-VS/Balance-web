@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"balance-web/internal/infrastructure/auth"
+	"balance-web/internal/infrastructure/turso"
 
 	"github.com/labstack/echo/v4"
 )
@@ -16,7 +17,7 @@ import (
 //  3. session_token HTTP cookie (browser SSR requests)
 //
 // On failure, returns 401 JSON — suitable for API routes.
-func FirebaseAuthMiddleware(firebaseAuth *auth.FirebaseAuth) echo.MiddlewareFunc {
+func FirebaseAuthMiddleware(firebaseAuth *auth.FirebaseAuth, store *turso.Store) echo.MiddlewareFunc {
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c echo.Context) error {
 			tokenString := extractToken(c)
@@ -41,6 +42,18 @@ func FirebaseAuthMiddleware(firebaseAuth *auth.FirebaseAuth) echo.MiddlewareFunc
 				})
 			}
 
+			if store == nil || store.DB == nil {
+				return c.JSON(http.StatusInternalServerError, map[string]string{
+					"error": "user provisioning store unavailable",
+				})
+			}
+
+			if err := turso.EnsureUserProvisioned(store.DB, uid); err != nil {
+				return c.JSON(http.StatusInternalServerError, map[string]string{
+					"error": "failed to provision user",
+				})
+			}
+
 			// Inject the authenticated user ID into the Echo context
 			c.Set("user_id", uid)
 			return next(c)
@@ -50,7 +63,7 @@ func FirebaseAuthMiddleware(firebaseAuth *auth.FirebaseAuth) echo.MiddlewareFunc
 
 // PageAuthMiddleware creates an Echo middleware for browser page navigation.
 // Instead of returning 401 JSON on failure, it redirects to /login.
-func PageAuthMiddleware(firebaseAuth *auth.FirebaseAuth) echo.MiddlewareFunc {
+func PageAuthMiddleware(firebaseAuth *auth.FirebaseAuth, store *turso.Store) echo.MiddlewareFunc {
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c echo.Context) error {
 			tokenString := extractToken(c)
@@ -65,6 +78,14 @@ func PageAuthMiddleware(firebaseAuth *auth.FirebaseAuth) echo.MiddlewareFunc {
 			}
 			if strings.TrimSpace(uid) == "" {
 				return c.Redirect(http.StatusFound, "/login")
+			}
+
+			if store == nil || store.DB == nil {
+				return c.String(http.StatusInternalServerError, "failed to provision user")
+			}
+
+			if err := turso.EnsureUserProvisioned(store.DB, uid); err != nil {
+				return c.String(http.StatusInternalServerError, "failed to provision user")
 			}
 
 			c.Set("user_id", uid)

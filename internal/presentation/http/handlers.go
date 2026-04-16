@@ -82,11 +82,11 @@ func (h *Handlers) RegisterRoutes(e *echo.Echo) {
 	e.POST("/api/auth/signout", h.SignOut)
 
 	// Page routes protected by redirect-based auth
-	pageAuth := PageAuthMiddleware(h.firebaseAuth)
+	pageAuth := PageAuthMiddleware(h.firebaseAuth, h.store)
 	e.GET("/", h.IndexHandler, pageAuth)
 
 	// Protected API routes (returns 401 JSON on failure)
-	authMiddleware := FirebaseAuthMiddleware(h.firebaseAuth)
+	authMiddleware := FirebaseAuthMiddleware(h.firebaseAuth, h.store)
 
 	api := e.Group("/api", authMiddleware)
 	api.GET("/activities", h.GetActivities)
@@ -379,7 +379,7 @@ func (h *Handlers) SyncSessions(c echo.Context) error {
 			Duration:          payload.Duration,
 			CreditsEarned:     payload.CreditsEarned,
 		}
-		
+
 		now := payload.Timestamp
 		session.EndTime = &now
 

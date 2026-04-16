@@ -2,8 +2,8 @@ package templates
 
 import "balance-web/internal/domain"
 
-templ Dashboard(activities []*domain.ActivityProfile, currentBalance string, isMobileOnline bool, wsURL string) {
-	@Layout(currentBalance, wsURL) {
+templ Dashboard(activities []*domain.ActivityProfile, currentBalance string, isMobileOnline bool, wsURL string, firebaseConfig FirebaseConfig) {
+	@Layout(currentBalance, wsURL, firebaseConfig) {
 		<main class="flex-1 p-6 md:p-12 relative" id="dashboard-main">
 			
 			<!-- Mobile Offline Overlay -->

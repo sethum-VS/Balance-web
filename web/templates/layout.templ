@@ -1,6 +1,6 @@
 package templates
 
-templ Layout(currentBalance string, wsURL string) {
+templ Layout(currentBalance string, wsURL string, firebaseConfig FirebaseConfig) {
 	<!DOCTYPE html>
 	<html class="dark" lang="en">
 		<head>
@@ -9,11 +9,21 @@ templ Layout(currentBalance string, wsURL string) {
 			<meta name="description" content="Balance - Time tracking and credit management web interface"/>
 			<title>Balance — Web Dashboard</title>
 			<script src="https://unpkg.com/htmx.org@1.9.11"></script>
+			<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+			<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
 			<link href="/static/css/styles.css" rel="stylesheet"/>
 			<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&amp;display=swap" rel="stylesheet"/>
 			<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
 		</head>
-		<body class="bg-surface text-on-surface antialiased min-h-screen" data-ws-url={ wsURL }>
+		<body
+			class="bg-surface text-on-surface antialiased min-h-screen"
+			data-ws-url={ wsURL }
+			data-firebase-api-key={ firebaseConfig.APIKey }
+			data-firebase-auth-domain={ firebaseConfig.AuthDomain }
+			data-firebase-project-id={ firebaseConfig.ProjectID }
+			data-firebase-storage-bucket={ firebaseConfig.StorageBucket }
+			data-firebase-messaging-sender-id={ firebaseConfig.MessagingSenderID }
+			data-firebase-app-id={ firebaseConfig.AppID }>
 			<!-- Top Navigation Bar -->
 			<nav class="sticky top-0 z-50 flex justify-between items-center px-12 h-20 w-full backdrop-blur-xl bg-opacity-60 bg-[#131313] border-b border-[#c4c5d9]/10 shadow-2xl shadow-black/50">
 				<div class="flex items-center gap-12">
@@ -32,12 +42,54 @@ templ Layout(currentBalance string, wsURL string) {
 							</span>
 						</div>
 					</div>
+					<button
+						id="signout-btn"
+						type="button"
+						class="px-4 py-2 rounded-full border border-outline-variant/50 text-on-surface-variant hover:text-on-surface hover:border-secondary/60 hover:bg-surface-container-high/60 transition-colors font-semibold text-sm"
+					>
+						Sign Out
+					</button>
 				</div>
 			</nav>
 			<div class="flex flex-col">
 				{ children... }
 			</div>
 			<script src="/static/js/main.js"></script>
+			<script>
+				const body = document.body;
+				const signOutButton = document.getElementById('signout-btn');
+
+				const firebaseConfig = {
+					apiKey: body.dataset.firebaseApiKey || '',
+					authDomain: body.dataset.firebaseAuthDomain || '',
+					projectId: body.dataset.firebaseProjectId || '',
+					storageBucket: body.dataset.firebaseStorageBucket || '',
+					messagingSenderId: body.dataset.firebaseMessagingSenderId || '',
+					appId: body.dataset.firebaseAppId || ''
+				};
+
+				if (!firebase.apps.length) {
+					firebase.initializeApp(firebaseConfig);
+				}
+
+				if (signOutButton) {
+					signOutButton.addEventListener('click', async function() {
+						try {
+							await firebase.auth().signOut();
+						} catch (error) {
+							console.error('Firebase sign out failed:', error);
+						}
+
+						try {
+							await fetch('/api/auth/signout', { method: 'POST' });
+						} catch (error) {
+							console.error('Backend sign out failed:', error);
+						}
+
+						window.location.href = '/login';
+					});
+				}
+			</script>
 		</body>
 	</html>
 }

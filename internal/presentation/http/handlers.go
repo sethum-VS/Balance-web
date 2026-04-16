@@ -79,6 +79,7 @@ func (h *Handlers) RegisterRoutes(e *echo.Echo) {
 
 	// Session cookie exchange (must be unprotected — exchanging token for cookie)
 	e.POST("/api/auth/session", h.CreateSession)
+	e.POST("/api/auth/signout", h.SignOut)
 
 	// Page routes protected by redirect-based auth
 	pageAuth := PageAuthMiddleware(h.firebaseAuth)
@@ -262,6 +263,21 @@ func (h *Handlers) CreateSession(c echo.Context) error {
 	return c.JSON(http.StatusOK, map[string]string{"status": "ok"})
 }
 
+// SignOut handles POST /api/auth/signout — clears the HttpOnly session cookie.
+func (h *Handlers) SignOut(c echo.Context) error {
+	cookie := new(http.Cookie)
+	cookie.Name = "session_token"
+	cookie.Value = ""
+	cookie.Path = "/"
+	cookie.MaxAge = -1
+	cookie.Expires = time.Unix(0, 0)
+	cookie.HttpOnly = true
+	cookie.Secure = true
+	c.SetCookie(cookie)
+
+	return c.JSON(http.StatusOK, map[string]string{"status": "ok"})
+}
+
 // IndexHandler renders the dashboard with user-scoped activity data.
 func (h *Handlers) IndexHandler(c echo.Context) error {
 	userID := c.Get("user_id").(string)
@@ -286,7 +302,16 @@ func (h *Handlers) IndexHandler(c echo.Context) error {
 		wsURL = "auto" // frontend will auto-detect from window.location
 	}
 
-	component := templates.Dashboard(activities, balanceStr, isMobileOnline, wsURL)
+	config := templates.FirebaseConfig{
+		APIKey:            os.Getenv("FIREBASE_API_KEY"),
+		AuthDomain:        os.Getenv("FIREBASE_AUTH_DOMAIN"),
+		ProjectID:         os.Getenv("FIREBASE_PROJECT_ID"),
+		StorageBucket:     os.Getenv("FIREBASE_STORAGE_BUCKET"),
+		MessagingSenderID: os.Getenv("FIREBASE_MESSAGING_SENDER_ID"),
+		AppID:             os.Getenv("FIREBASE_APP_ID"),
+	}
+
+	component := templates.Dashboard(activities, balanceStr, isMobileOnline, wsURL, config)
 	return Render(c, http.StatusOK, component)
 }
 

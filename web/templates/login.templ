@@ -99,14 +99,6 @@ templ LoginPage(firebaseConfig FirebaseConfig) {
 							<span id="login-btn-text">Sign In</span>
 							<span id="login-spinner" class="hidden w-5 h-5 border-2 border-[#131313]/30 border-t-[#131313] rounded-full animate-spin"></span>
 						</button>
-
-						<button
-							type="button"
-							id="auth-mode-toggle"
-							class="w-full text-sm text-on-surface-variant hover:text-secondary transition-colors font-medium"
-						>
-							Need an account? Create one
-						</button>
 					</form>
 				</div>
 
@@ -147,11 +139,6 @@ templ LoginPage(firebaseConfig FirebaseConfig) {
 				const googleBtn = document.getElementById('google-signin-btn');
 				const googleBtnText = document.getElementById('google-btn-text');
 				const googleSpinner = document.getElementById('google-spinner');
-				const authModeToggle = document.getElementById('auth-mode-toggle');
-				const passwordInput = document.getElementById('password');
-
-				let authMode = 'signin';
-				let activeLoadingSource = null;
 
 				function clearMessage() {
 					messageDiv.textContent = '';
@@ -170,31 +157,12 @@ templ LoginPage(firebaseConfig FirebaseConfig) {
 					messageDiv.classList.remove('hidden');
 				}
 
-				function applyAuthModeText() {
-					if (authMode === 'signup') {
-						loginBtnText.textContent = 'Create Account';
-						authModeToggle.textContent = 'Already have an account? Sign in';
-						passwordInput.setAttribute('autocomplete', 'new-password');
-					} else {
-						loginBtnText.textContent = 'Sign In';
-						authModeToggle.textContent = 'Need an account? Create one';
-						passwordInput.setAttribute('autocomplete', 'current-password');
-					}
-				}
-
-				function setAuthMode(mode) {
-					authMode = mode;
-					applyAuthModeText();
-				}
-
 				function setLoading(loading, source) {
-					activeLoadingSource = loading ? source : null;
 					loginBtn.disabled = loading;
 					googleBtn.disabled = loading;
-					authModeToggle.disabled = loading;
 					if (loading) {
 						if (source === 'email') {
-							loginBtnText.textContent = authMode === 'signup' ? 'Creating account...' : 'Signing in...';
+							loginBtnText.textContent = 'Signing in...';
 							loginSpinner.classList.remove('hidden');
 						}
 						if (source === 'google') {
@@ -204,7 +172,7 @@ templ LoginPage(firebaseConfig FirebaseConfig) {
 						loginBtn.classList.add('opacity-80');
 						googleBtn.classList.add('opacity-80');
 					} else {
-						applyAuthModeText();
+						loginBtnText.textContent = 'Sign In';
 						loginSpinner.classList.add('hidden');
 						googleBtnText.textContent = 'Sign in with Google';
 						googleSpinner.classList.add('hidden');
@@ -221,8 +189,6 @@ templ LoginPage(firebaseConfig FirebaseConfig) {
 					if (code === 'auth/invalid-email') return 'Invalid email address';
 					if (code === 'auth/too-many-requests') return 'Too many attempts. Please try again later';
 					if (code === 'auth/invalid-credential') return 'Invalid email or password';
-					if (code === 'auth/email-already-in-use') return 'An account with this email already exists';
-					if (code === 'auth/weak-password') return 'Password should be at least 6 characters';
 					if (code === 'auth/popup-closed-by-user') return 'Google sign-in popup closed before completion';
 					if (code === 'auth/popup-blocked') return 'Popup was blocked. Please allow popups and try again';
 					if (code === 'auth/cancelled-popup-request') return 'Google sign-in was canceled due to another popup request';
@@ -240,14 +206,6 @@ templ LoginPage(firebaseConfig FirebaseConfig) {
 					if (!response.ok) {
 						throw new Error('Backend rejected the session token.');
 					}
-				}
-
-				if (authModeToggle) {
-					authModeToggle.addEventListener('click', function() {
-						if (activeLoadingSource) return;
-						clearMessage();
-						setAuthMode(authMode === 'signin' ? 'signup' : 'signin');
-					});
 				}
 
 				if (googleBtn) {
@@ -278,8 +236,6 @@ templ LoginPage(firebaseConfig FirebaseConfig) {
 				if (!form) {
 					console.error('Login form not found.');
 				} else {
-					setAuthMode('signin');
-
 					form.addEventListener('submit', async function(e) {
 						e.preventDefault();
 						console.log('Submit intercepted. Starting login flow...');
@@ -290,20 +246,6 @@ templ LoginPage(firebaseConfig FirebaseConfig) {
 						const password = document.getElementById('password').value;
 
 						try {
-							if (authMode === 'signup') {
-								const userCredential = await firebase.auth().createUserWithEmailAndPassword(email, password);
-								if (!userCredential.user) {
-									throw new Error('Account created but user session is unavailable.');
-								}
-
-								await userCredential.user.sendEmailVerification();
-								await firebase.auth().signOut();
-								showMessage('Verification email sent. Please check your inbox before logging in.', 'success');
-								setAuthMode('signin');
-								form.reset();
-								return;
-							}
-
 							const userCredential = await firebase.auth().signInWithEmailAndPassword(email, password);
 							if (!userCredential.user) {
 								throw new Error('Login failed to return a user.');

@@ -67,7 +67,7 @@ func (h *Handlers) ServeWS(c echo.Context) error {
 		DeviceType: deviceType,
 		Send:       make(chan *domain.WSEvent, 256),
 	}
-	
+
 	h.hub.Register <- client
 
 	// Start a simplistic read/write pump
@@ -84,6 +84,7 @@ func (h *Handlers) readPump(client *infrastructure.Client, conn *websocket.Conn)
 	})
 
 	defer func() {
+		// Disconnect only removes client presence; it must not mutate timer session state.
 		h.hub.Unregister <- client
 		conn.Close()
 	}()

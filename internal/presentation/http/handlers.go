@@ -26,27 +26,21 @@ type Handlers struct {
 	timerService *application.TimerService
 	hub          *websocket.Hub
 	firebaseAuth *auth.FirebaseAuth
-	// Track the active session per user
-	activeSessions map[string]string // userID -> sessionID
 }
 
 // NewHandlers creates a new Handlers instance with all dependencies.
 func NewHandlers(store *turso.Store, activityRepo *turso.ActivityRepoAdapter, sessionRepo *turso.SessionRepoAdapter, timerService *application.TimerService, hub *websocket.Hub, firebaseAuth *auth.FirebaseAuth) *Handlers {
 	h := &Handlers{
-		store:          store,
-		activityRepo:   activityRepo,
-		sessionRepo:    sessionRepo,
-		timerService:   timerService,
-		hub:            hub,
-		firebaseAuth:   firebaseAuth,
-		activeSessions: make(map[string]string),
+		store:        store,
+		activityRepo: activityRepo,
+		sessionRepo:  sessionRepo,
+		timerService: timerService,
+		hub:          hub,
+		firebaseAuth: firebaseAuth,
 	}
 
 	// Register AutoKill listener to broadcast user-scoped WS messages
 	h.timerService.OnAutoStop = func(userID string, session *domain.Session) {
-		if activeID, ok := h.activeSessions[userID]; ok && activeID == session.ID {
-			delete(h.activeSessions, userID)
-		}
 		log.Printf("[AutoKill] Session auto-stopped on 0 CR: user=%s id=%s duration=%ds", userID, session.ID, session.Duration)
 
 		h.hub.Broadcast <- &domain.WSEvent{
@@ -92,9 +86,59 @@ func (h *Handlers) RegisterRoutes(e *echo.Echo) {
 	api.GET("/activities", h.GetActivities)
 	api.POST("/activities", h.CreateActivity)
 	api.POST("/activities/sync", h.SyncActivities)
+	api.GET("/timer/active", h.GetActiveTimer)
 	api.POST("/timer/start", h.StartTimer)
 	api.POST("/timer/stop", h.StopTimer)
 	api.POST("/sync", h.SyncSessions)
+}
+
+// GetActiveTimer returns the current active timer payload for resilient reconnect/reload recovery.
+func (h *Handlers) GetActiveTimer(c echo.Context) error {
+	userID := c.Get("user_id").(string)
+
+	activeSession, err := h.sessionRepo.FindActiveByUserID(userID)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+
+	if activeSession == nil {
+		return c.JSON(http.StatusOK, map[string]interface{}{
+			"active": false,
+		})
+	}
+
+	activityName := ""
+	activityCategory := ""
+	if activity, err := h.activityRepo.FindByID(userID, activeSession.ActivityProfileID); err == nil && activity != nil {
+		activityName = activity.Name
+		activityCategory = string(activity.Category)
+	}
+
+	totalBalance := h.timerService.CalculateGlobalBalance(userID)
+	elapsed := int(time.Since(activeSession.StartTime).Seconds())
+	if elapsed < 0 {
+		elapsed = 0
+	}
+
+	baseBalance := totalBalance
+	if activityCategory == string(domain.ActivityCategoryToppingUp) {
+		baseBalance = totalBalance - elapsed
+		if baseBalance < 0 {
+			baseBalance = 0
+		}
+	} else if activityCategory == string(domain.ActivityCategoryConsuming) {
+		baseBalance = totalBalance + elapsed
+	}
+
+	return c.JSON(http.StatusOK, map[string]interface{}{
+		"active":           true,
+		"sessionID":        activeSession.ID,
+		"activityID":       activeSession.ActivityProfileID,
+		"activityName":     activityName,
+		"activityCategory": activityCategory,
+		"startTime":        activeSession.StartTime,
+		"baseBalance":      baseBalance,
+	})
 }
 
 // HealthHandler returns a simple JSON health check response.
@@ -142,9 +186,13 @@ func (h *Handlers) StartTimer(c echo.Context) error {
 		return c.NoContent(http.StatusNoContent)
 	}
 
-	// If there's already an active session for this user, stop it first
-	if activeID, ok := h.activeSessions[userID]; ok && activeID != "" {
-		_, err := h.timerService.StopSession(userID, activeID)
+	// If there's already an active session for this user, stop it first.
+	activeSession, err := h.sessionRepo.FindActiveByUserID(userID)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	if activeSession != nil {
+		_, err := h.timerService.StopSession(userID, activeSession.ID)
 		if err != nil {
 			log.Printf("Error auto-stopping previous session: %v", err)
 		}
@@ -154,8 +202,6 @@ func (h *Handlers) StartTimer(c echo.Context) error {
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
-
-	h.activeSessions[userID] = session.ID
 
 	// Broadcast user-scoped TIMER_STARTED event with baseBalance for client-side ticking
 	h.hub.Broadcast <- &domain.WSEvent{
@@ -178,17 +224,19 @@ func (h *Handlers) StartTimer(c echo.Context) error {
 func (h *Handlers) StopTimer(c echo.Context) error {
 	userID := c.Get("user_id").(string)
 
-	activeID, ok := h.activeSessions[userID]
-	if !ok || activeID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "no active session")
-	}
-
-	session, err := h.timerService.StopSession(userID, activeID)
+	activeSession, err := h.sessionRepo.FindActiveByUserID(userID)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 
-	delete(h.activeSessions, userID)
+	if activeSession == nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "no active session")
+	}
+
+	session, err := h.timerService.StopSession(userID, activeSession.ID)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
 
 	log.Printf("[StopTimer] Session stopped: user=%s id=%s duration=%ds credits=%d",
 		userID, session.ID, session.Duration, session.CreditsEarned)

@@ -9,6 +9,8 @@ import (
 	"time"
 )
 
+const maxSessionDuration = 24 * time.Hour
+
 // TimerService encapsulates the business logic for starting, stopping,
 // and calculating time/credit sessions.
 type TimerService struct {
@@ -54,21 +56,28 @@ func (s *TimerService) StartSession(userID, activityProfileID string) (*domain.S
 		return nil, fmt.Errorf("failed to save session: %w", err)
 	}
 
-	// --- Auto-Kill Switch for Consuming Activities ---
+	// Session source-of-truth is persisted start timestamp. Disconnects do not stop sessions.
+	// Auto-stop is used only for explicit policy limits (consume balance cap and max duration).
+	autoStopAfter := maxSessionDuration
 	if activity.Category == domain.ActivityCategoryConsuming {
 		currentBalance := s.CalculateGlobalBalance(userID)
 		if currentBalance > 0 {
-			s.mu.Lock()
-			s.autoStopTimers[session.ID] = time.AfterFunc(time.Duration(currentBalance)*time.Second, func() {
-				// Stop the session automatically
-				stoppedSess, err := s.StopSession(userID, session.ID)
-				if err == nil && s.OnAutoStop != nil {
-					s.OnAutoStop(userID, stoppedSess)
-				}
-			})
-			s.mu.Unlock()
+			balanceCap := time.Duration(currentBalance) * time.Second
+			if balanceCap < autoStopAfter {
+				autoStopAfter = balanceCap
+			}
 		}
 	}
+
+	s.mu.Lock()
+	s.autoStopTimers[session.ID] = time.AfterFunc(autoStopAfter, func() {
+		// Stop the session automatically.
+		stoppedSess, err := s.StopSession(userID, session.ID)
+		if err == nil && s.OnAutoStop != nil {
+			s.OnAutoStop(userID, stoppedSess)
+		}
+	})
+	s.mu.Unlock()
 
 	return session, nil
 }

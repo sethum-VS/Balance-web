@@ -79,6 +79,21 @@ func (r *SessionRepoAdapter) FindByActivityProfileID(userID, activityProfileID s
 	return sessions, nil
 }
 
+// FindActiveByUserID returns the most recent active session for a user, if any.
+func (r *SessionRepoAdapter) FindActiveByUserID(userID string) (*domain.Session, error) {
+	if err := validateSessionUserID(userID); err != nil {
+		return nil, err
+	}
+
+	row := r.db.QueryRow(
+		"SELECT id, user_id, activity_profile_id, status, start_time, end_time, duration, credits_earned FROM sessions WHERE user_id = ? AND status = ? ORDER BY start_time DESC LIMIT 1",
+		userID,
+		string(domain.SessionStatusActive),
+	)
+
+	return scanSession(row)
+}
+
 func (r *SessionRepoAdapter) Save(userID string, s *domain.Session) error {
 	if err := validateSessionUserID(userID); err != nil {
 		return err
@@ -95,14 +110,14 @@ func (r *SessionRepoAdapter) Save(userID string, s *domain.Session) error {
 			duration=excluded.duration, 
 			credits_earned=excluded.credits_earned
 	`
-	
+
 	// Handle optional end_time mapping
 	var endTimeStr *string
 	if s.EndTime != nil {
 		str := s.EndTime.Format(time.RFC3339)
 		endTimeStr = &str
 	}
-	
+
 	_, err := r.db.Exec(query, s.ID, userID, s.ActivityProfileID, string(s.Status), s.StartTime.Format(time.RFC3339), endTimeStr, s.Duration, s.CreditsEarned)
 	return err
 }

@@ -33,6 +33,16 @@ interface MobileStatusPayload {
   isOnline: boolean;
 }
 
+interface ActiveTimerResponse {
+  active: boolean;
+  sessionID?: string;
+  activityID?: string;
+  activityName?: string;
+  activityCategory?: string;
+  startTime?: string;
+  baseBalance?: number;
+}
+
 // ──────────────────────────── State ────────────────────────────
 let ws: WebSocket | null = null;
 let clockInterval: ReturnType<typeof setInterval> | null = null;
@@ -73,6 +83,7 @@ function connectWebSocket(): void {
 
   ws.onopen = () => {
     console.log("[Balance WS] Connected");
+    void syncActiveSessionFromServer();
   };
 
   ws.onmessage = (event: MessageEvent) => {
@@ -112,6 +123,38 @@ function dispatchWSEvent(event: WSEvent): void {
       break;
     default:
       console.warn("[Balance WS] Unknown event type:", event.type);
+  }
+}
+
+async function syncActiveSessionFromServer(): Promise<void> {
+  try {
+    const response = await fetch("/api/timer/active", { method: "GET" });
+    if (!response.ok) {
+      return;
+    }
+
+    const payload = (await response.json()) as ActiveTimerResponse;
+    if (payload.active && payload.startTime && payload.sessionID && payload.activityID) {
+      handleTimerStarted({
+        sessionID: payload.sessionID,
+        activityID: payload.activityID,
+        activityName: payload.activityName ?? "",
+        activityCategory: payload.activityCategory ?? "",
+        startTime: payload.startTime,
+        baseBalance: payload.baseBalance ?? globalBalance,
+      });
+      return;
+    }
+
+    if (!payload.active && sessionStartTime) {
+      handleTimerStopped({
+        sessionID: "",
+        duration: currentSessionTime,
+        creditsEarned: 0,
+      });
+    }
+  } catch (err) {
+    console.warn("[Balance WS] Failed to sync active timer:", err);
   }
 }
 
@@ -346,5 +389,6 @@ document.addEventListener("DOMContentLoaded", () => {
     alert(evt.detail.value);
   });
 
+  void syncActiveSessionFromServer();
   connectWebSocket();
 });

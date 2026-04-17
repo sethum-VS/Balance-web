@@ -85,6 +85,15 @@ templ LoginPage(firebaseConfig FirebaseConfig) {
 								class="w-full px-4 py-3 bg-surface-container-lowest rounded-xl border border-outline-variant/20 text-on-surface placeholder-on-surface-variant/50 focus:outline-none focus:ring-2 focus:ring-secondary/50 focus:border-secondary transition-all"
 								placeholder="••••••••"
 							/>
+							<div class="flex justify-end mt-2">
+								<button
+									type="button"
+									id="forgot-password-btn"
+									class="text-xs font-medium text-on-surface-variant hover:text-secondary transition-colors disabled:opacity-70"
+								>
+									Forgot password?
+								</button>
+							</div>
 						</div>
 
 						<!-- Status Message -->
@@ -139,6 +148,7 @@ templ LoginPage(firebaseConfig FirebaseConfig) {
 				const googleBtn = document.getElementById('google-signin-btn');
 				const googleBtnText = document.getElementById('google-btn-text');
 				const googleSpinner = document.getElementById('google-spinner');
+				const forgotPasswordBtn = document.getElementById('forgot-password-btn');
 
 				function clearMessage() {
 					messageDiv.textContent = '';
@@ -160,6 +170,9 @@ templ LoginPage(firebaseConfig FirebaseConfig) {
 				function setLoading(loading, source) {
 					loginBtn.disabled = loading;
 					googleBtn.disabled = loading;
+					if (forgotPasswordBtn) {
+						forgotPasswordBtn.disabled = loading;
+					}
 					if (loading) {
 						if (source === 'email') {
 							loginBtnText.textContent = 'Signing in...';
@@ -169,6 +182,9 @@ templ LoginPage(firebaseConfig FirebaseConfig) {
 							googleBtnText.textContent = 'Connecting...';
 							googleSpinner.classList.remove('hidden');
 						}
+						if (source === 'reset' && forgotPasswordBtn) {
+							forgotPasswordBtn.textContent = 'Sending...';
+						}
 						loginBtn.classList.add('opacity-80');
 						googleBtn.classList.add('opacity-80');
 					} else {
@@ -176,6 +192,9 @@ templ LoginPage(firebaseConfig FirebaseConfig) {
 						loginSpinner.classList.add('hidden');
 						googleBtnText.textContent = 'Sign in with Google';
 						googleSpinner.classList.add('hidden');
+						if (forgotPasswordBtn) {
+							forgotPasswordBtn.textContent = 'Forgot password?';
+						}
 						loginBtn.classList.remove('opacity-80');
 						googleBtn.classList.remove('opacity-80');
 					}
@@ -194,6 +213,14 @@ templ LoginPage(firebaseConfig FirebaseConfig) {
 					if (code === 'auth/cancelled-popup-request') return 'Google sign-in was canceled due to another popup request';
 					if (code === 'auth/account-exists-with-different-credential') return 'An account already exists with a different sign-in method';
 					return err && err.message ? err.message : 'An error occurred';
+				}
+
+				function showError(errOrMessage) {
+					if (typeof errOrMessage === 'string') {
+						showMessage(errOrMessage, 'error');
+						return;
+					}
+					showMessage(resolveAuthMessage(errOrMessage), 'error');
 				}
 
 				async function exchangeTokenForSession(idToken) {
@@ -226,7 +253,31 @@ templ LoginPage(firebaseConfig FirebaseConfig) {
 							return;
 						} catch (err) {
 							console.error('Google Sign-In Failed:', err);
-							showMessage(resolveAuthMessage(err), 'error');
+							showError(err);
+						} finally {
+							setLoading(false);
+						}
+					});
+				}
+
+				if (forgotPasswordBtn) {
+					forgotPasswordBtn.addEventListener('click', async function(e) {
+						e.preventDefault();
+						clearMessage();
+
+						const email = document.getElementById('email').value.trim();
+						if (!email) {
+							showError('Please enter your email address to reset your password.');
+							return;
+						}
+
+						setLoading(true, 'reset');
+						try {
+							await firebase.auth().sendPasswordResetEmail(email);
+							showMessage('Password reset link sent! Check your inbox.', 'success');
+						} catch (err) {
+							console.error('Password Reset Failed:', err);
+							showError(err);
 						} finally {
 							setLoading(false);
 						}
@@ -264,7 +315,7 @@ templ LoginPage(firebaseConfig FirebaseConfig) {
 							return;
 						} catch (err) {
 							console.error('Login Failed:', err);
-							showMessage(resolveAuthMessage(err), 'error');
+							showError(err);
 						} finally {
 							setLoading(false);
 						}

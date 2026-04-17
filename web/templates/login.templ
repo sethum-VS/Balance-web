@@ -35,6 +35,29 @@ templ LoginPage(firebaseConfig FirebaseConfig) {
 
 				<!-- Login Card -->
 				<div class="bg-surface-container-high rounded-2xl p-8 neumorphic-up border border-outline-variant/10">
+					<div class="space-y-4 mb-6">
+						<button
+							type="button"
+							id="google-signin-btn"
+							class="w-full py-3.5 bg-[#f5f6f7] text-[#202124] font-semibold rounded-xl border border-[#dadce0] hover:bg-white transition-all shadow-sm flex items-center justify-center gap-3 disabled:opacity-70"
+						>
+							<svg class="w-5 h-5" viewBox="0 0 48 48" aria-hidden="true">
+								<path fill="#FFC107" d="M43.6 20.5H42V20H24v8h11.3C33.7 32.7 29.3 36 24 36c-6.6 0-12-5.4-12-12s5.4-12 12-12c3 0 5.8 1.1 8 3l5.7-5.7C34.1 6.1 29.3 4 24 4C12.9 4 4 12.9 4 24s8.9 20 20 20 20-8.9 20-20c0-1.3-.1-2.3-.4-3.5z"/>
+								<path fill="#FF3D00" d="M6.3 14.7l6.6 4.8C14.6 15.1 18.9 12 24 12c3 0 5.8 1.1 8 3l5.7-5.7C34.1 6.1 29.3 4 24 4c-7.7 0-14.3 4.3-17.7 10.7z"/>
+								<path fill="#4CAF50" d="M24 44c5.2 0 9.9-2 13.5-5.2l-6.2-5.2c-2.1 1.6-4.7 2.4-7.3 2.4-5.3 0-9.7-3.3-11.3-8l-6.6 5.1C9.6 39.6 16.2 44 24 44z"/>
+								<path fill="#1976D2" d="M43.6 20.5H42V20H24v8h11.3c-.8 2.4-2.3 4.3-4 5.6l.1-.1 6.2 5.2C37.2 39.1 44 34 44 24c0-1.3-.1-2.3-.4-3.5z"/>
+							</svg>
+							<span id="google-btn-text">Sign in with Google</span>
+							<span id="google-spinner" class="hidden w-5 h-5 border-2 border-[#202124]/30 border-t-[#202124] rounded-full animate-spin"></span>
+						</button>
+
+						<div class="flex items-center gap-3 text-on-surface-variant/60 text-xs">
+							<div class="h-px flex-1 bg-outline-variant/20"></div>
+							<span>or use email</span>
+							<div class="h-px flex-1 bg-outline-variant/20"></div>
+						</div>
+					</div>
+
 					<form id="login-form" class="space-y-6">
 						<!-- Email -->
 						<div>
@@ -64,8 +87,8 @@ templ LoginPage(firebaseConfig FirebaseConfig) {
 							/>
 						</div>
 
-						<!-- Error Message -->
-						<div id="login-error" class="hidden text-error text-sm font-medium bg-error/10 px-4 py-3 rounded-xl border border-error/20"></div>
+						<!-- Status Message -->
+						<div id="login-message" class="hidden text-sm font-medium px-4 py-3 rounded-xl border"></div>
 
 						<!-- Submit Button -->
 						<button 
@@ -75,6 +98,14 @@ templ LoginPage(firebaseConfig FirebaseConfig) {
 						>
 							<span id="login-btn-text">Sign In</span>
 							<span id="login-spinner" class="hidden w-5 h-5 border-2 border-[#131313]/30 border-t-[#131313] rounded-full animate-spin"></span>
+						</button>
+
+						<button
+							type="button"
+							id="auth-mode-toggle"
+							class="w-full text-sm text-on-surface-variant hover:text-secondary transition-colors font-medium"
+						>
+							Need an account? Create one
 						</button>
 					</form>
 				</div>
@@ -109,71 +140,190 @@ templ LoginPage(firebaseConfig FirebaseConfig) {
 				}
 
 				const form = document.getElementById('login-form');
-				const errorDiv = document.getElementById('login-error');
+				const messageDiv = document.getElementById('login-message');
 				const loginBtn = document.getElementById('login-btn');
 				const loginBtnText = document.getElementById('login-btn-text');
 				const loginSpinner = document.getElementById('login-spinner');
+				const googleBtn = document.getElementById('google-signin-btn');
+				const googleBtnText = document.getElementById('google-btn-text');
+				const googleSpinner = document.getElementById('google-spinner');
+				const authModeToggle = document.getElementById('auth-mode-toggle');
+				const passwordInput = document.getElementById('password');
 
-				function showError(msg) {
-					errorDiv.textContent = msg;
-					errorDiv.classList.remove('hidden');
+				let authMode = 'signin';
+				let activeLoadingSource = null;
+
+				function clearMessage() {
+					messageDiv.textContent = '';
+					messageDiv.classList.add('hidden');
+					messageDiv.classList.remove('text-error', 'bg-error/10', 'border-error/20', 'text-secondary', 'bg-secondary/10', 'border-secondary/20');
 				}
 
-				function setLoading(loading) {
-					loginBtn.disabled = loading;
-					if (loading) {
-						loginBtnText.textContent = 'Signing in...';
-						loginSpinner.classList.remove('hidden');
-						loginBtn.classList.add('opacity-80');
+				function showMessage(msg, tone) {
+					clearMessage();
+					messageDiv.textContent = msg;
+					if (tone === 'success') {
+						messageDiv.classList.add('text-secondary', 'bg-secondary/10', 'border-secondary/20');
+					} else {
+						messageDiv.classList.add('text-error', 'bg-error/10', 'border-error/20');
+					}
+					messageDiv.classList.remove('hidden');
+				}
+
+				function applyAuthModeText() {
+					if (authMode === 'signup') {
+						loginBtnText.textContent = 'Create Account';
+						authModeToggle.textContent = 'Already have an account? Sign in';
+						passwordInput.setAttribute('autocomplete', 'new-password');
 					} else {
 						loginBtnText.textContent = 'Sign In';
-						loginSpinner.classList.add('hidden');
-						loginBtn.classList.remove('opacity-80');
+						authModeToggle.textContent = 'Need an account? Create one';
+						passwordInput.setAttribute('autocomplete', 'current-password');
 					}
+				}
+
+				function setAuthMode(mode) {
+					authMode = mode;
+					applyAuthModeText();
+				}
+
+				function setLoading(loading, source) {
+					activeLoadingSource = loading ? source : null;
+					loginBtn.disabled = loading;
+					googleBtn.disabled = loading;
+					authModeToggle.disabled = loading;
+					if (loading) {
+						if (source === 'email') {
+							loginBtnText.textContent = authMode === 'signup' ? 'Creating account...' : 'Signing in...';
+							loginSpinner.classList.remove('hidden');
+						}
+						if (source === 'google') {
+							googleBtnText.textContent = 'Connecting...';
+							googleSpinner.classList.remove('hidden');
+						}
+						loginBtn.classList.add('opacity-80');
+						googleBtn.classList.add('opacity-80');
+					} else {
+						applyAuthModeText();
+						loginSpinner.classList.add('hidden');
+						googleBtnText.textContent = 'Sign in with Google';
+						googleSpinner.classList.add('hidden');
+						loginBtn.classList.remove('opacity-80');
+						googleBtn.classList.remove('opacity-80');
+					}
+				}
+
+				function resolveAuthMessage(err) {
+					const code = err && err.code ? err.code : '';
+					if (code === 'auth/email-not-verified') return 'Please verify your email address to continue.';
+					if (code === 'auth/user-not-found') return 'No account found with this email';
+					if (code === 'auth/wrong-password') return 'Incorrect password';
+					if (code === 'auth/invalid-email') return 'Invalid email address';
+					if (code === 'auth/too-many-requests') return 'Too many attempts. Please try again later';
+					if (code === 'auth/invalid-credential') return 'Invalid email or password';
+					if (code === 'auth/email-already-in-use') return 'An account with this email already exists';
+					if (code === 'auth/weak-password') return 'Password should be at least 6 characters';
+					if (code === 'auth/popup-closed-by-user') return 'Google sign-in popup closed before completion';
+					if (code === 'auth/popup-blocked') return 'Popup was blocked. Please allow popups and try again';
+					if (code === 'auth/cancelled-popup-request') return 'Google sign-in was canceled due to another popup request';
+					if (code === 'auth/account-exists-with-different-credential') return 'An account already exists with a different sign-in method';
+					return err && err.message ? err.message : 'An error occurred';
+				}
+
+				async function exchangeTokenForSession(idToken) {
+					const response = await fetch('/api/auth/session', {
+						method: 'POST',
+						headers: { 'Content-Type': 'application/json' },
+						body: JSON.stringify({ idToken: idToken })
+					});
+
+					if (!response.ok) {
+						throw new Error('Backend rejected the session token.');
+					}
+				}
+
+				if (authModeToggle) {
+					authModeToggle.addEventListener('click', function() {
+						if (activeLoadingSource) return;
+						clearMessage();
+						setAuthMode(authMode === 'signin' ? 'signup' : 'signin');
+					});
+				}
+
+				if (googleBtn) {
+					googleBtn.addEventListener('click', async function() {
+						clearMessage();
+						setLoading(true, 'google');
+
+						try {
+							const provider = new firebase.auth.GoogleAuthProvider();
+							const result = await firebase.auth().signInWithPopup(provider);
+							if (!result.user) {
+								throw new Error('Google sign-in did not return a user.');
+							}
+
+							const idToken = await result.user.getIdToken();
+							await exchangeTokenForSession(idToken);
+							window.location.href = '/';
+							return;
+						} catch (err) {
+							console.error('Google Sign-In Failed:', err);
+							showMessage(resolveAuthMessage(err), 'error');
+						} finally {
+							setLoading(false);
+						}
+					});
 				}
 
 				if (!form) {
 					console.error('Login form not found.');
 				} else {
+					setAuthMode('signin');
+
 					form.addEventListener('submit', async function(e) {
 						e.preventDefault();
 						console.log('Submit intercepted. Starting login flow...');
-						errorDiv.classList.add('hidden');
-						setLoading(true);
+						clearMessage();
+						setLoading(true, 'email');
 
 						const email = document.getElementById('email').value;
 						const password = document.getElementById('password').value;
 
 						try {
-							console.log('1. Attempting Firebase Auth...');
-							const userCredential = await firebase.auth().signInWithEmailAndPassword(email, password);
+							if (authMode === 'signup') {
+								const userCredential = await firebase.auth().createUserWithEmailAndPassword(email, password);
+								if (!userCredential.user) {
+									throw new Error('Account created but user session is unavailable.');
+								}
 
-							console.log('2. Fetching ID Token...');
-							const idToken = await userCredential.user.getIdToken();
-
-							console.log('3. Exchanging Token with Backend...');
-							const response = await fetch('/api/auth/session', {
-								method: 'POST',
-								headers: { 'Content-Type': 'application/json' },
-								body: JSON.stringify({ idToken: idToken })
-							});
-
-							if (response.ok) {
-								console.log('4. Success! Redirecting...');
-								window.location.href = '/';
+								await userCredential.user.sendEmailVerification();
+								await firebase.auth().signOut();
+								showMessage('Verification email sent. Please check your inbox before logging in.', 'success');
+								setAuthMode('signin');
+								form.reset();
 								return;
 							}
 
-							throw new Error('Backend rejected the session token.');
+							const userCredential = await firebase.auth().signInWithEmailAndPassword(email, password);
+							if (!userCredential.user) {
+								throw new Error('Login failed to return a user.');
+							}
+
+							if (!userCredential.user.emailVerified) {
+								await firebase.auth().signOut();
+								const verifyError = new Error('Please verify your email address to continue.');
+								verifyError.code = 'auth/email-not-verified';
+								throw verifyError;
+							}
+
+							const idToken = await userCredential.user.getIdToken();
+							await exchangeTokenForSession(idToken);
+							window.location.href = '/';
+							return;
 						} catch (err) {
 							console.error('Login Failed:', err);
-							let message = err?.message || 'An error occurred';
-							if (err.code === 'auth/user-not-found') message = 'No account found with this email';
-							else if (err.code === 'auth/wrong-password') message = 'Incorrect password';
-							else if (err.code === 'auth/invalid-email') message = 'Invalid email address';
-							else if (err.code === 'auth/too-many-requests') message = 'Too many attempts. Please try again later';
-							else if (err.code === 'auth/invalid-credential') message = 'Invalid email or password';
-							showError(message);
+							showMessage(resolveAuthMessage(err), 'error');
+						} finally {
 							setLoading(false);
 						}
 					});

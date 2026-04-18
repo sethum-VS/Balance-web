@@ -3,9 +3,9 @@
 > A real-time, multi-tenant time-tracking platform built with Go, HTMX, and WebSockets.  
 > The server acts as the **single source of truth** for both the HTMX web dashboard and the companion Swift iOS app.
 
-## 📺 Demo
+## Demo
 
-[Web App Demo](https://imgur.com/a/fdV9391)
+<img src="https://github.com/sethum-VS/myGIF/blob/main/Adobe%20Express%20-%20web%20-%20Balance.gif" width="auto" height="auto">
 
 ---
 
